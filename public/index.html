@@ -17,15 +17,13 @@
             var isDevBrowser = !isNativeApp && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '';
             
             // Check if user set custom URL in app settings
-            var savedUrl = localStorage.getItem('YT_ANALYZER_CUSTOM_API_URL');
-            var defaultCloudUrl = 'https://yt-analyzer-pro-backend.onrender.com';
+            var defaultCloudUrl = 'https://yt-analyzer-pro-backend.vercel.app';
             var defaultLocalIp = 'http://192.168.1.9:5000';
             
             var selectedUrl = '';
             if (savedUrl && savedUrl.trim()) {
                 selectedUrl = savedUrl.trim().replace(/\/$/, '');
             } else if (isNativeApp) {
-                // In native APK, default to Cloud URL, fallback list will be tested if offline
                 selectedUrl = defaultCloudUrl;
             } else if (!isDevBrowser) {
                 selectedUrl = window.location.origin;
@@ -35,10 +33,9 @@
             window.IS_NATIVE_APP = isNativeApp;
             window.API_FALLBACK_URLS = [
                 savedUrl,
-                'http://192.168.1.9:5000',
-                'http://192.168.1.9:3000',
+                defaultCloudUrl,
                 'https://ytanalyzerpro.loca.lt',
-                defaultCloudUrl
+                'http://192.168.1.9:5000'
             ].filter(Boolean);
 
             console.log('[YT Analyzer] Mode:', isNativeApp ? 'Native APK' : 'Browser', '| Active API:', window.API_BASE_URL || 'Local Origin');

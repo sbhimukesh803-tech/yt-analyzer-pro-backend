@@ -1746,8 +1746,11 @@ Return ONLY valid JSON matching:
     }
 });
 
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, () => console.log(`YT Analyzer running at http://localhost:${PORT}`));
+// On Vercel: export as serverless function (no listen needed)
+// On Render / local / all other platforms: start listening normally
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => console.log(`✅ YT Analyzer Pro running at http://localhost:${PORT}`));
 }
 
 module.exports = app;
+
