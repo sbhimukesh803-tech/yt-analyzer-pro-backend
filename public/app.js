@@ -1231,8 +1231,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Smart Server Auto-Discovery & Auto-Fallback ──────────────────────
     const CANDIDATE_URLS = [
         localStorage.getItem('YT_ANALYZER_CUSTOM_API_URL'),
+        'https://yt-analyzer-pro-backend.onrender.com',
         'https://yt-analyzer-pro-backend.vercel.app',
-        'https://ytanalyzerpro.loca.lt',
         'http://192.168.1.9:5000'
     ].filter(Boolean).map(u => u.trim().replace(/\/$/, ''));
 

@@ -17,8 +17,8 @@
             var isDevBrowser = !isNativeApp && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '';
             
             // Check if user set custom URL in app settings
-            var defaultCloudUrl = 'https://yt-analyzer-pro-backend.vercel.app';
-            var defaultLocalIp = 'http://192.168.1.9:5000';
+            var savedUrl = localStorage.getItem('YT_ANALYZER_CUSTOM_API_URL');
+            var defaultCloudUrl = 'https://yt-analyzer-pro-backend.onrender.com';
             
             var selectedUrl = '';
             if (savedUrl && savedUrl.trim()) {
@@ -33,8 +33,8 @@
             window.IS_NATIVE_APP = isNativeApp;
             window.API_FALLBACK_URLS = [
                 savedUrl,
-                defaultCloudUrl,
-                'https://ytanalyzerpro.loca.lt',
+                'https://yt-analyzer-pro-backend.onrender.com',
+                'https://yt-analyzer-pro-backend.vercel.app',
                 'http://192.168.1.9:5000'
             ].filter(Boolean);
 
@@ -139,7 +139,19 @@
                     </div>
                 </div>
 
-                <!-- Scores Grid -->
+                <!-- SUB-TABS NAVIGATION (Positioned at TOP of analysis breakdown) -->
+                <div class="mobile-tabs-scroll" id="main-tabs-nav" style="position:sticky;top:56px;z-index:90;background:var(--bg-card);padding:0.5rem;border-radius:14px;margin-bottom:1rem;border:1px solid var(--border-glow);display:flex;gap:0.4rem;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                    <button class="tab-btn active" data-tab="tab-reviews"><i class="fa-solid fa-star"></i> Review</button>
+                    <button class="tab-btn" data-tab="tab-deep"><i class="fa-solid fa-brain"></i> Deep Audit</button>
+                    <button class="tab-btn" data-tab="tab-seo"><i class="fa-solid fa-tags"></i> SEO</button>
+                    <button class="tab-btn" data-tab="tab-growth"><i class="fa-solid fa-rocket"></i> Growth</button>
+                    <button class="tab-btn" data-tab="tab-script"><i class="fa-solid fa-pen-nib"></i> Transcript</button>
+                    <button class="tab-btn" data-tab="tab-intel"><i class="fa-solid fa-chart-bar"></i> Intel</button>
+                    <button class="tab-btn" data-tab="tab-chat"><i class="fa-solid fa-comments"></i> AI Coach</button>
+                    <button class="tab-btn" data-tab="tab-upload"><i class="fa-solid fa-circle-arrow-up"></i> Strategy</button>
+                </div>
+
+                <!-- Scores & Overview Widgets -->
                 <div class="mobile-scores-grid">
                     <div class="card score-widget">
                         <div class="score-radial">
@@ -196,113 +208,370 @@
                     <button class="new-analysis-btn" id="new-analysis-btn"><i class="fa-solid fa-rotate-left"></i> Analyze Another</button>
                 </div>
 
-                <!-- Sub-Tabs Navigation for Mobile Analysis Breakdown -->
-                <div class="results-column">
-                    <div class="mobile-tabs-scroll" id="main-tabs-nav">
-                        <button class="tab-btn active" data-tab="tab-reviews"><i class="fa-solid fa-star"></i> Review</button>
-                        <button class="tab-btn" data-tab="tab-deep"><i class="fa-solid fa-brain"></i> Deep Audit</button>
-                        <button class="tab-btn" data-tab="tab-seo"><i class="fa-solid fa-tags"></i> SEO</button>
-                        <button class="tab-btn" data-tab="tab-growth"><i class="fa-solid fa-rocket"></i> Growth</button>
-                        <button class="tab-btn" data-tab="tab-script"><i class="fa-solid fa-pen-nib"></i> Transcript</button>
-                        <button class="tab-btn" data-tab="tab-intel"><i class="fa-solid fa-chart-bar"></i> Intel</button>
-                        <button class="tab-btn" data-tab="tab-chat"><i class="fa-solid fa-comments"></i> AI Coach</button>
-                        <button class="tab-btn" data-tab="tab-upload"><i class="fa-solid fa-circle-arrow-up"></i> Strategy</button>
+                <!-- TABS CONTENT AREA -->
+                <div class="tabs-content" style="margin-top:1rem;">
+                    <!-- TAB 1: REVIEW -->
+                    <div class="tab-panel active" id="tab-reviews">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-eye text-primary"></i> Visual Quality</h3>
+                            <p class="feedback-text" id="feedback-visual"></p>
+                            <hr class="divider">
+                            <h3><i class="fa-solid fa-microphone text-primary"></i> Audio & Voiceover</h3>
+                            <p class="feedback-text" id="feedback-audio"></p>
+                            <hr class="divider">
+                            <h3><i class="fa-solid fa-magnet text-primary"></i> Video Hook (First 3–10 sec)</h3>
+                            <p class="feedback-text" id="feedback-hook"></p>
+                            <hr class="divider">
+                            <h3><i class="fa-solid fa-scissors text-primary"></i> Editing Style & Pacing</h3>
+                            <p class="feedback-text" id="feedback-editing"></p>
+                            <hr class="divider">
+                            <h3 class="suggestions-title"><i class="fa-solid fa-wand-magic-sparkles text-primary"></i> Key Improvements</h3>
+                            <ul class="suggestions-list" id="suggestions-list"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-book-open text-primary"></i> Storytelling Structure</h3>
+                            <div class="storytelling-grid" id="storytelling-grid"></div>
+                            <p class="feedback-text" id="storytelling-arc" style="margin-top:0.75rem;"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-gauge text-primary"></i> Pacing Analysis</h3>
+                            <div style="margin-bottom:0.75rem;"><span id="pacing-overall" class="pacing-overall-badge">Normal</span></div>
+                            <div id="pacing-fast-list"></div>
+                            <div id="pacing-slow-list" style="margin-top:0.5rem;"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.9rem;color:var(--text-muted);">Pacing Recommendations:</h4>
+                            <ul class="suggestions-list" id="pacing-recommendations"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-face-laugh-beam text-primary"></i> Humor & Entertainment Score</h3>
+                            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+                                <div class="score-circle-sm" id="humor-score-circle" style="width:50px;height:50px;border-radius:50%;border:3px solid #4ade80;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;"><span id="humor-score-val">0</span></div>
+                                <span style="font-size:0.9rem;color:var(--text-secondary);">Fun & Entertainment Index</span>
+                            </div>
+                            <div id="humor-moments-list"></div>
+                            <ul class="suggestions-list" id="humor-suggestions" style="margin-top:0.5rem;"></ul>
+                        </div>
                     </div>
 
-                    <div class="tabs-content">
-                        <!-- TAB 1: REVIEW -->
-                        <div class="tab-panel active" id="tab-reviews">
-                            <div class="card panel-card">
-                                <h3>Visual Quality</h3><p class="feedback-text" id="feedback-visual"></p>
-                                <hr class="divider">
-                                <h3>Audio & Voiceover</h3><p class="feedback-text" id="feedback-audio"></p>
-                                <hr class="divider">
-                                <h3>Video Hook (First 3–10 sec)</h3><p class="feedback-text" id="feedback-hook"></p>
-                                <hr class="divider">
-                                <h3>Editing Style & Pacing</h3><p class="feedback-text" id="feedback-editing"></p>
-                                <hr class="divider">
-                                <h3 class="suggestions-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Key Improvements</h3>
-                                <ul class="suggestions-list" id="suggestions-list"></ul>
-                            </div>
-                        </div>
-
-                        <!-- TAB 2: DEEP AUDIT -->
-                        <div class="tab-panel" id="tab-deep">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-eye"></i> Visual Scene-by-Scene Audit</h3>
-                                <p class="feedback-text" id="deep-visual-breakdown"></p>
-                                <hr class="divider">
-                                <h3><i class="fa-solid fa-microphone"></i> Voice & Tone Polish</h3>
-                                <p class="feedback-text" id="deep-audio-breakdown"></p>
-                            </div>
-                        </div>
-
-                        <!-- TAB 3: SEO -->
-                        <div class="tab-panel" id="tab-seo">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-heading"></i> Title Recommendations</h3>
-                                <div id="seo-titles-list"></div>
-                                <hr class="divider">
-                                <h3><i class="fa-solid fa-tags"></i> Tags & Keywords</h3>
-                                <div class="tags-pill-container" id="seo-tags-container"></div>
-                            </div>
-                        </div>
-
-                        <!-- TAB 4: GROWTH -->
-                        <div class="tab-panel" id="tab-growth">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-chart-line"></i> Viral Potential Forecast</h3>
-                                <p class="feedback-text" id="growth-forecast"></p>
-                                <hr class="divider">
-                                <h3><i class="fa-solid fa-bullseye"></i> Target Audience Profile</h3>
-                                <p class="feedback-text" id="growth-audience"></p>
-                            </div>
-                        </div>
-
-                        <!-- TAB 5: SCRIPT -->
-                        <div class="tab-panel" id="tab-script">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-scroll"></i> Speech Transcript</h3>
-                                <div class="transcript-box" id="script-transcript"></div>
-                            </div>
-                        </div>
-
-                        <!-- TAB 6: INTEL -->
-                        <div class="tab-panel" id="tab-intel">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-lightbulb"></i> Content Intelligence</h3>
-                                <div class="badge-grid" id="content-badges-grid"></div>
-                            </div>
-                        </div>
-
-                        <!-- TAB 7: AI CHAT -->
-                        <div class="tab-panel" id="tab-chat">
-                            <div class="card panel-card chat-card">
-                                <h3><i class="fa-solid fa-comments"></i> Chat With Your Video</h3>
-                                <div class="chat-messages" id="chat-messages">
-                                    <div class="chat-msg ai-msg">
-                                        <div class="chat-avatar"><i class="fa-solid fa-robot"></i></div>
-                                        <div class="chat-bubble">Ask me anything about your video's retention, hook, or performance! 🎬</div>
-                                    </div>
-                                </div>
-                                <div class="chat-input-row">
-                                    <input type="text" class="chat-input" id="chat-input" placeholder="Ask AI coach..." maxlength="500">
-                                    <button class="chat-send-btn" id="chat-send-btn"><i class="fa-solid fa-paper-plane"></i></button>
+                    <!-- TAB 2: DEEP AUDIT -->
+                    <div class="tab-panel" id="tab-deep">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-magnet text-primary"></i> Hook Strength & Retention Prediction</h3>
+                            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+                                <div class="score-circle-sm" id="hook-score-circle" style="width:50px;height:50px;border-radius:50%;border:3px solid #4ade80;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;"><span id="hook-score-val">0</span></div>
+                                <div>
+                                    <div style="font-weight:600;" id="hook-retention-pred">Retention: High</div>
                                 </div>
                             </div>
+                            <p class="feedback-text" id="hook-text"></p>
+                            <h4 style="margin-top:0.75rem;font-size:0.9rem;color:var(--text-muted);">Hook Improvement Ideas:</h4>
+                            <ul class="suggestions-list" id="hook-suggestions-list"></ul>
                         </div>
 
-                        <!-- TAB 8: UPLOAD STRATEGY -->
-                        <div class="tab-panel" id="tab-upload">
-                            <div class="card panel-card">
-                                <h3><i class="fa-solid fa-wand-magic-sparkles"></i> AI Generated Thumbnail Concept</h3>
-                                <div class="thumbnail-preview-wrapper" id="thumbnail-wrapper">
-                                    <img id="thumbnail-img" src="" alt="AI Thumbnail" style="width:100%;border-radius:10px;display:none;">
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-user-ninja text-primary"></i> Facial Expression & Emotion Detector</h3>
+                            <div id="face-analysis-box"></div>
+                            <ul class="suggestions-list" id="face-suggestions" style="margin-top:0.5rem;"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-waveform text-primary"></i> Voice Energy & Speech Pace</h3>
+                            <div id="voice-stats-row" style="display:flex;gap:0.75rem;margin-bottom:0.75rem;"></div>
+                            <div id="monotone-sections-list"></div>
+                            <ul class="suggestions-list" id="voice-recommendations" style="margin-top:0.5rem;"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-chart-line-down text-primary"></i> Retention Dip Map</h3>
+                            <div id="retention-map"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-star-of-life text-primary"></i> Highlight & Replay Moments</h3>
+                            <h4 style="font-size:0.85rem;color:var(--text-muted);">High Peak Moments:</h4>
+                            <div id="highlight-moments-list"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Replay / Rewind Triggers:</h4>
+                            <div id="replay-moments-list"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-masks-theater text-primary"></i> Meme Potential & Shorts Cut Ideas</h3>
+                            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+                                <div class="score-circle-sm" id="meme-score-circle" style="width:45px;height:45px;border-radius:50%;border:3px solid #a855f7;display:flex;align-items:center;justify-content:center;font-weight:700;"><span id="meme-score-val">0</span></div>
+                                <span style="font-size:0.85rem;color:var(--text-muted);">Virality & Meme Score</span>
+                            </div>
+                            <div id="meme-clips-list"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Recommended Shorts Clips:</h4>
+                            <div id="shorts-clips-list"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-users-viewfinder text-primary"></i> Competitor Benchmark</h3>
+                            <p class="feedback-text" id="competitor-style"></p>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Missing Viral Elements:</h4>
+                            <ul class="suggestions-list" id="competitor-missing"></ul>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Inspired Upgrades:</h4>
+                            <ul class="suggestions-list" id="competitor-inspired"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-vial text-primary"></i> Title A/B Test Predictor</h3>
+                            <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;">
+                                <div class="card" id="ab-card-a" style="flex:1;padding:0.75rem;background:var(--bg-glass);">
+                                    <strong style="color:var(--text-primary);">Title A:</strong>
+                                    <p id="ab-title-a" style="font-size:0.85rem;margin-top:0.25rem;"></p>
                                 </div>
-                                <div class="strategy-row" style="margin-top:1rem;">
-                                    <div class="strategy-col"><h4><i class="fa-solid fa-clock"></i> Best Time</h4><p id="strategy-time">-</p></div>
-                                    <div class="strategy-col"><h4><i class="fa-solid fa-users"></i> Target</h4><p id="strategy-audience">-</p></div>
+                                <div class="card" id="ab-card-b" style="flex:1;padding:0.75rem;background:var(--bg-glass);">
+                                    <strong style="color:var(--text-primary);">Title B:</strong>
+                                    <p id="ab-title-b" style="font-size:0.85rem;margin-top:0.25rem;"></p>
                                 </div>
+                            </div>
+                            <div style="margin-bottom:0.5rem;"><strong style="color:#86efac;">Predicted Winner:</strong> <span id="ab-winner-text">Title A</span></div>
+                            <p class="feedback-text" id="ab-reasoning"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-mobile-screen-button text-primary"></i> Shorts Format Suitability</h3>
+                            <div style="margin-bottom:0.5rem;"><span id="shorts-badge" class="shorts-badge shorts-yes">Suitable</span></div>
+                            <p class="feedback-text" id="shorts-reasoning"></p>
+                            <div style="font-size:0.85rem;color:var(--text-muted);margin-top:0.5rem;">Recommended Duration: <strong id="shorts-duration" style="color:var(--text-primary);">60s</strong></div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: SEO -->
+                    <div class="tab-panel" id="tab-seo">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-heading text-primary"></i> Optimized Title Suggestions</h3>
+                            <div id="seo-titles"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-align-left text-primary"></i> SEO Description Generator</h3>
+                            <div class="desc-tabs-nav" style="display:flex;gap:0.4rem;margin-bottom:0.5rem;">
+                                <button class="desc-tab-btn active">Option 1</button>
+                                <button class="desc-tab-btn">Option 2</button>
+                                <button class="desc-tab-btn">Option 3</button>
+                            </div>
+                            <textarea id="seo-description" class="mobile-textarea" rows="6" style="width:100%;font-size:0.85rem;"></textarea>
+                            <button class="secondary-btn" id="copy-desc-btn" style="margin-top:0.5rem;"><i class="fa-solid fa-copy"></i> Copy Description</button>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-hashtag text-primary"></i> Recommended Hashtags</h3>
+                            <small id="hashtag-limit-guide" style="color:var(--text-muted);display:block;margin-bottom:0.5rem;"></small>
+                            <div id="seo-hashtags" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-tags text-primary"></i> Search Tags & Keywords</h3>
+                            <small id="tag-limit-guide" style="color:var(--text-muted);display:block;margin-bottom:0.5rem;"></small>
+                            <div id="seo-tags" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 4: GROWTH -->
+                    <div class="tab-panel" id="tab-growth">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-chart-line text-primary"></i> Views Forecast</h3>
+                            <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                                <div class="sub-growth-card" style="flex:1;text-align:center;"><span class="sg-period">Worst</span><span class="sg-val" id="pred-worst" style="color:#f87171;">-</span></div>
+                                <div class="sub-growth-card" style="flex:1;text-align:center;"><span class="sg-period">Average</span><span class="sg-val" id="pred-avg" style="color:#facc15;">-</span></div>
+                                <div class="sub-growth-card" style="flex:1;text-align:center;"><span class="sg-period">Best</span><span class="sg-val" id="pred-best" style="color:#4ade80;">-</span></div>
+                            </div>
+                            <p class="feedback-text" id="pred-reasoning"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-thumbs-up text-primary"></i> Engagement Prediction</h3>
+                            <div id="engagement-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem;"></div>
+                            <p class="feedback-text" id="engagement-reasoning"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-user-plus text-primary"></i> Subscriber Growth Potential</h3>
+                            <div id="sub-growth-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.75rem;"></div>
+                            <p class="feedback-text" id="sub-growth-reasoning"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-clock text-primary"></i> Optimal Upload Timing</h3>
+                            <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+                                <div><small style="color:var(--text-muted);">Best Day:</small><div style="font-weight:700;" id="timing-day">-</div></div>
+                                <div><small style="color:var(--text-muted);">Best Time:</small><div style="font-weight:700;" id="timing-time">-</div></div>
+                            </div>
+                            <p class="feedback-text" id="timing-reasoning"></p>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Country Specific Peak Times:</h4>
+                            <div id="country-timing-grid"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-users text-primary"></i> Target Audience Profile</h3>
+                            <div style="margin-bottom:0.5rem;"><small style="color:var(--text-muted);">Primary:</small> <span id="aud-primary" style="font-weight:600;">-</span></div>
+                            <div style="margin-bottom:0.5rem;"><small style="color:var(--text-muted);">Secondary:</small> <span id="aud-secondary" style="font-weight:600;">-</span></div>
+                            <p class="feedback-text" id="aud-profile"></p>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Audience Interests:</h4>
+                            <div id="aud-interests" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-calendar-days text-primary"></i> Weekly Content Calendar</h3>
+                            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">Consistency Goal: <strong id="calendar-consistency" style="color:var(--text-primary);">-</strong></div>
+                            <div id="calendar-grid"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-film text-primary"></i> Video Series Planner</h3>
+                            <div id="series-title-box" style="margin-bottom:0.75rem;"></div>
+                            <div id="episode-list"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Sequel & Follow-up Ideas:</h4>
+                            <ul class="suggestions-list" id="sequel-ideas-list"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-bullseye text-primary"></i> Channel Strategy & Next Ideas</h3>
+                            <h4 style="font-size:0.85rem;color:var(--text-muted);">Future Video Ideas:</h4>
+                            <ul class="suggestions-list" id="growth-video-ideas"></ul>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Overall Strategy:</h4>
+                            <p class="feedback-text" id="growth-strategy"></p>
+                        </div>
+                    </div>
+
+                    <!-- TAB 5: SCRIPT & EDITING -->
+                    <div class="tab-panel" id="tab-script">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-scroll text-primary"></i> Full Speech Transcript</h3>
+                            <textarea id="transcript-box" class="mobile-textarea" rows="6" readonly style="width:100%;font-size:0.85rem;"></textarea>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-pen-to-square text-primary"></i> Polished Script Rewrite</h3>
+                            <textarea id="script-rewrite-box" class="mobile-textarea" rows="6" readonly style="width:100%;font-size:0.85rem;"></textarea>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-file-contract text-primary"></i> Executive Summary</h3>
+                            <p class="feedback-text" id="short-summary"></p>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Key Takeaways:</h4>
+                            <ul class="suggestions-list" id="key-points-list"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-list-ol text-primary"></i> Video Chapters & Timestamps</h3>
+                            <div id="chapters-list"></div>
+                            <button class="secondary-btn" id="copy-chapters-btn" style="margin-top:0.5rem;"><i class="fa-solid fa-copy"></i> Copy Timestamps</button>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-bullhorn text-primary"></i> CTA & Retention Triggers</h3>
+                            <ul class="suggestions-list" id="cta-list"></ul>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-clapperboard text-primary"></i> B-Roll Visual Suggestions</h3>
+                            <div id="broll-list"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-volume-high text-primary"></i> Sound Effects SFX Suggestions</h3>
+                            <div id="sfx-list"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-music text-primary"></i> Music Track & Style Recommendation</h3>
+                            <div id="music-style-card"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-font text-primary"></i> Subtitle Kinetic Keywords</h3>
+                            <div id="subtitle-highlights" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-layer-group text-primary"></i> Scene & Key Frames List</h3>
+                            <h4 style="font-size:0.85rem;color:var(--text-muted);">Scene Breakdown:</h4>
+                            <div id="scene-list"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Key Visual Frames:</h4>
+                            <div id="key-frames-list"></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-up-long text-primary"></i> AI Score Improvement Gap</h3>
+                            <div id="improvement-score-box"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Key Changes Required:</h4>
+                            <ul class="suggestions-list" id="improvement-changes-list"></ul>
+                            <div style="font-size:0.85rem;color:var(--text-muted);margin-top:0.5rem;">Estimated Time: <strong id="improvement-time" style="color:var(--text-primary);">-</strong></div>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-volume-xmark text-primary"></i> Dead Air & Silence Detector</h3>
+                            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">Total Silence: <strong id="silence-estimate" style="color:var(--text-primary);">-</strong></div>
+                            <div id="silence-list"></div>
+                            <p class="feedback-text" id="silence-verdict" style="margin-top:0.5rem;"></p>
+                        </div>
+                    </div>
+
+                    <!-- TAB 6: VIDEO INTEL -->
+                    <div class="tab-panel" id="tab-intel">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-crosshairs text-primary"></i> Niche & Micro-Niche Detector</h3>
+                            <div id="niche-grid"></div>
+                            <h4 style="margin-top:0.75rem;font-size:0.85rem;color:var(--text-muted);">Sub-Niches:</h4>
+                            <div id="niche-sub-tags" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                            <p class="feedback-text" id="niche-monetization-fit" style="margin-top:0.5rem;"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-sack-dollar text-primary"></i> Monetization & CPM Potential</h3>
+                            <div id="monetization-grid"></div>
+                            <p class="feedback-text" id="monetization-reasoning" style="margin-top:0.5rem;"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-handshake text-primary"></i> Sponsor Opportunity Score</h3>
+                            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+                                <div class="score-circle-sm" id="sponsor-score-circle" style="width:45px;height:45px;border-radius:50%;border:3px solid #4ade80;display:flex;align-items:center;justify-content:center;font-weight:700;"><span id="sponsor-score-val">0</span></div>
+                                <div><p id="sponsor-friendly" style="font-weight:600;font-size:0.9rem;margin:0;"></p></div>
+                            </div>
+                            <h4 style="font-size:0.85rem;color:var(--text-muted);">Potential Sponsor Brands:</h4>
+                            <div id="potential-brands" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+                            <p class="feedback-text" id="sponsor-reasoning" style="margin-top:0.5rem;"></p>
+                        </div>
+
+                        <div class="card panel-card" style="margin-top:1rem;">
+                            <h3><i class="fa-solid fa-shield-halved text-primary"></i> Copyright & Policy Safety Risk</h3>
+                            <div id="copyright-grid"></div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 7: AI CHAT -->
+                    <div class="tab-panel" id="tab-chat">
+                        <div class="card panel-card chat-card">
+                            <h3><i class="fa-solid fa-comments text-primary"></i> Chat With Your Video AI Coach</h3>
+                            <div class="chat-messages" id="chat-messages" style="max-height:350px;overflow-y:auto;padding:0.5rem;display:flex;flex-direction:column;gap:0.75rem;">
+                                <div class="chat-msg ai-msg">
+                                    <div class="chat-avatar"><i class="fa-solid fa-robot"></i></div>
+                                    <div class="chat-bubble">Ask me anything about your video's retention, hook, or performance! 🎬</div>
+                                </div>
+                            </div>
+                            <div class="chat-input-row" style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+                                <input type="text" class="mobile-input" id="chat-input" placeholder="Ask AI coach..." maxlength="500" style="flex:1;">
+                                <button class="primary-btn" id="chat-send-btn" style="width:auto;padding:0 1rem;"><i class="fa-solid fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 8: UPLOAD STRATEGY -->
+                    <div class="tab-panel" id="tab-upload">
+                        <div class="card panel-card">
+                            <h3><i class="fa-solid fa-wand-magic-sparkles text-primary"></i> AI Generated Thumbnail Concept</h3>
+                            <div class="thumbnail-preview-wrapper" id="thumbnail-wrapper">
+                                <img id="thumbnail-img" src="" alt="AI Thumbnail" style="width:100%;border-radius:10px;display:none;">
+                            </div>
+                            <div class="strategy-row" style="margin-top:1rem;display:flex;gap:1rem;">
+                                <div class="strategy-col" style="flex:1;"><h4><i class="fa-solid fa-clock"></i> Best Time</h4><p id="strategy-time">-</p></div>
+                                <div class="strategy-col" style="flex:1;"><h4><i class="fa-solid fa-users"></i> Target</h4><p id="strategy-audience">-</p></div>
                             </div>
                         </div>
                     </div>

@@ -4038,4 +4038,43 @@ label {
 .text-secondary { color: #7928ca !important; }
 .text-success { color: #10b981 !important; }
 
+/* Mobile Analysis Navigation Bar */
+.mobile-tabs-scroll {
+    display: flex !important;
+    gap: 0.5rem !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    scroll-behavior: smooth !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding: 0.6rem !important;
+    background: rgba(15, 23, 42, 0.95) !important;
+    backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 16px !important;
+    scrollbar-width: none !important;
+}
+.mobile-tabs-scroll::-webkit-scrollbar {
+    display: none !important;
+}
+.mobile-tabs-scroll .tab-btn {
+    flex: 0 0 auto !important;
+    padding: 0.6rem 1.1rem !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    border-radius: 12px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: #94a3b8 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.4rem !important;
+    transition: all 0.25s ease !important;
+}
+.mobile-tabs-scroll .tab-btn.active {
+    background: linear-gradient(135deg, #ff0055, #7928ca) !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+    box-shadow: 0 4px 15px rgba(255, 0, 85, 0.4) !important;
+}
+
 
