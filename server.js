@@ -48,8 +48,11 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+const os = require('os');
+const uploadDir = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    try { fs.mkdirSync(uploadDir, { recursive: true }); } catch(e) { console.warn('Could not create uploadDir:', e.message); }
+}
 
 const videoStorage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
@@ -1743,4 +1746,8 @@ Return ONLY valid JSON matching:
     }
 });
 
-app.listen(PORT, () => console.log(`YT Analyzer running at http://localhost:${PORT}`));
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, () => console.log(`YT Analyzer running at http://localhost:${PORT}`));
+}
+
+module.exports = app;
