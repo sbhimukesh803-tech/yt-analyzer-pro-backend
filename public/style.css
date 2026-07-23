@@ -4077,4 +4077,193 @@ label {
     box-shadow: 0 4px 15px rgba(255, 0, 85, 0.4) !important;
 }
 
+/* ── New Card Component Styles ─────────────────────────────── */
+
+/* Visual Quality Grid */
+.vq-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.65rem 0.75rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.07);
+}
+.vq-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.vq-val { font-size: 0.9rem; font-weight: 700; color: #e2e8f0; }
+
+/* Audio Quality Grid */
+.aq-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.07);
+}
+.aq-item i { font-size: 0.85rem; color: var(--primary-glow); min-width: 14px; }
+.aq-label { font-size: 0.8rem; color: var(--text-muted); flex: 1; }
+.aq-val { font-size: 0.85rem; font-weight: 700; }
+.aq-item.full-width { grid-column: 1 / -1; }
+
+/* Creator Cards */
+.creator-card {
+    padding: 0.85rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 0.6rem;
+}
+.creator-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #c4b5fd;
+    margin-bottom: 0.5rem;
+}
+.creator-diff-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+/* Editing Style Tags */
+.editing-style-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 20px;
+    border: 1px solid;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+.editing-conf {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Community Guidelines */
+.cg-risk-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.cg-risk-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.85rem;
+    border-radius: 20px;
+    border: 1px solid;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+.cg-demonet-pill {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+/* Improvement Plan Steps */
+.plan-step {
+    display: flex;
+    gap: 0.85rem;
+    align-items: flex-start;
+    padding: 0.75rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 0.6rem;
+}
+.plan-step-num {
+    min-width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #7928ca, #ff0055);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+.plan-step-info { flex: 1; }
+.plan-step-action {
+    font-size: 0.88rem;
+    color: #e2e8f0;
+    margin-bottom: 0.4rem;
+    line-height: 1.4;
+}
+.plan-step-tags { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.plan-tag {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #94a3b8;
+}
+
+/* Encouragement Box */
+.encouragement-box {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(139,92,246,0.1));
+    border: 1px solid rgba(236,72,153,0.25);
+    border-radius: 14px;
+    font-size: 0.9rem;
+    color: #fce7f3;
+    line-height: 1.5;
+}
+.encouragement-box i {
+    color: #ec4899;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+/* Chat Suggest Buttons */
+.chat-suggest-btn {
+    padding: 0.35rem 0.8rem;
+    border-radius: 20px;
+    border: 1px solid rgba(139,92,246,0.35);
+    background: rgba(139,92,246,0.08);
+    color: #c4b5fd;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+.chat-suggest-btn:hover {
+    background: rgba(139,92,246,0.2);
+    border-color: rgba(139,92,246,0.6);
+}
+
+/* Secondary Button */
+.secondary-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1rem;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color: #e2e8f0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.secondary-btn:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+}
+
+
 

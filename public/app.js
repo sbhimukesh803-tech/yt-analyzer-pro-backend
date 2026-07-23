@@ -72,6 +72,11 @@ document.addEventListener('DOMContentLoaded', () => {
             tabButtons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             tabPanels.forEach(p => p.id === target ? p.classList.add('active') : p.classList.remove('active'));
+            // Scroll to top of tab nav so content is visible from the top
+            const nav = document.getElementById('main-tabs-nav');
+            if (nav) {
+                window.scrollTo({ top: nav.offsetTop - 60, behavior: 'smooth' });
+            }
         });
     });
 
@@ -911,7 +916,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cgr = data.communityGuidelineRisk;
             const riskColor = r => r === 'Very Low' || r === 'Low' ? '#4ade80' : r === 'Medium' ? '#facc15' : '#f87171';
             const cgBox = document.getElementById('cg-risk-box');
-            cgBox.innerHTML = `
+            if (cgBox) cgBox.innerHTML = `
                 <div class="cg-risk-row">
                     <div class="cg-risk-pill" style="color:${riskColor(cgr.riskLevel)};border-color:${riskColor(cgr.riskLevel)}40;background:${riskColor(cgr.riskLevel)}15;">${cgr.riskLevel||'N/A'}</div>
                     <div class="cg-demonet-pill">Demonetization: <strong>${cgr.demonetizationRisk||'N/A'}</strong></div>
@@ -925,7 +930,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.visualQualityDetailed) {
             const vq = data.visualQualityDetailed;
             const vqg = document.getElementById('visual-quality-grid');
-            vqg.innerHTML = [
+            if (vqg) vqg.innerHTML = [
                 { label: 'Lighting', val: vq.lighting },
                 { label: 'Color Grading', val: vq.colorGrading },
                 { label: 'Camera Shake', val: vq.cameraShake },
@@ -946,13 +951,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.backgroundAnalysis) {
             const ba = data.backgroundAnalysis;
             const bdl = document.getElementById('background-distractions-list');
-            bdl.innerHTML = '';
-            (ba.distractions || []).forEach(d => {
-                const div = document.createElement('div');
-                div.className = 'broll-item';
-                div.innerHTML = `<span class="broll-ts">${d.timestamp||'–'}</span><span class="broll-text">${d.description}</span>`;
-                bdl.appendChild(div);
-            });
+            if (bdl) {
+                bdl.innerHTML = '';
+                (ba.distractions || []).forEach(d => {
+                    const div = document.createElement('div');
+                    div.className = 'broll-item';
+                    div.innerHTML = `<span class="broll-ts">${d.timestamp||'–'}</span><span class="broll-text">${d.description}</span>`;
+                    bdl.appendChild(div);
+                });
+            }
             setText('background-suggestions', ba.suggestions ? ba.suggestions.join(' · ') : '');
         }
 
@@ -962,10 +969,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const esb = document.getElementById('editing-style-box');
             const styleColors = { 'fast-paced':'#f97316', 'cinematic':'#a78bfa', 'educational':'#60a5fa', 'gaming':'#4ade80', 'vlog':'#facc15' };
             const col = styleColors[(esa.style||'').toLowerCase()] || '#a78bfa';
-            esb.innerHTML = `<div class="editing-style-tag" style="color:${col};border-color:${col}40;background:${col}15;"><i class="fa-solid fa-film"></i> ${esa.style||'N/A'}</div><span class="editing-conf">${esa.confidence||0}% confident</span>`;
+            if (esb) esb.innerHTML = `<div class="editing-style-tag" style="color:${col};border-color:${col}40;background:${col}15;"><i class="fa-solid fa-film"></i> ${esa.style||'N/A'}</div><span class="editing-conf">${esa.confidence||0}% confident</span>`;
             const ec = document.getElementById('editing-characteristics');
-            ec.innerHTML = '';
-            (esa.characteristics || []).forEach(c => { const p = document.createElement('span'); p.className = 'tag-pill secondary'; p.innerText = c; ec.appendChild(p); });
+            if (ec) {
+                ec.innerHTML = '';
+                (esa.characteristics || []).forEach(c => { const p = document.createElement('span'); p.className = 'tag-pill secondary'; p.innerText = c; ec.appendChild(p); });
+            }
             renderList('editing-alternatives', esa.alternativeStyles || []);
         }
 
@@ -973,18 +982,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.similarCreatorAnalysis) {
             const sca = data.similarCreatorAnalysis;
             const cl = document.getElementById('creators-list');
-            cl.innerHTML = '';
-            (sca.creators || []).forEach(c => {
-                const div = document.createElement('div');
-                div.className = 'creator-card';
-                div.innerHTML = `
-                    <div class="creator-name"><i class="fa-solid fa-user-tie"></i> ${c.name}</div>
-                    <div class="creator-diff-row">
-                        <div><span style="color:#4ade80;">✅ Strength:</span> ${c.strength}</div>
-                        <div><span style="color:#f87171;">❌ Weakness:</span> ${c.weakness}</div>
-                    </div>`;
-                cl.appendChild(div);
-            });
+            if (cl) {
+                cl.innerHTML = '';
+                (sca.creators || []).forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'creator-card';
+                    div.innerHTML = `
+                        <div class="creator-name"><i class="fa-solid fa-user-tie"></i> ${c.name}</div>
+                        <div class="creator-diff-row">
+                            <div><span style="color:#4ade80;">✅ Strength:</span> ${c.strength}</div>
+                            <div><span style="color:#f87171;">❌ Weakness:</span> ${c.weakness}</div>
+                        </div>`;
+                    cl.appendChild(div);
+                });
+            }
             setText('creator-differentiator', sca.differentiators || '');
             setText('creator-edge', sca.competitiveEdge || '');
         }
@@ -993,8 +1004,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.trendingTopicAnalysis) {
             const ta = data.trendingTopicAnalysis;
             const mt = document.getElementById('matching-trends');
-            mt.innerHTML = '';
-            (ta.matchingTrends || []).forEach(t => { const p = document.createElement('span'); p.className = 'tag-pill'; p.innerText = t; mt.appendChild(p); });
+            if (mt) {
+                mt.innerHTML = '';
+                (ta.matchingTrends || []).forEach(t => { const p = document.createElement('span'); p.className = 'tag-pill'; p.innerText = t; mt.appendChild(p); });
+            }
             renderList('trend-opportunities', ta.opportunities || []);
         }
 
@@ -1003,8 +1016,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const ft = data.futureTrendPrediction;
             setText('trend-timeframe', ft.timeframe || '');
             const ut = document.getElementById('upcoming-topics');
-            ut.innerHTML = '';
-            (ft.upcomingTopics || []).forEach(t => { const p = document.createElement('span'); p.className = 'tag-pill'; p.innerText = t; ut.appendChild(p); });
+            if (ut) {
+                ut.innerHTML = '';
+                (ft.upcomingTopics || []).forEach(t => { const p = document.createElement('span'); p.className = 'tag-pill'; p.innerText = t; ut.appendChild(p); });
+            }
             renderList('future-content-ideas', ft.contentIdeas || []);
         }
 
@@ -1013,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const aq = data.audioQualityDetailed;
             const aqg = document.getElementById('audio-quality-grid');
             const noiseColor = aq.noiseLevel === 'Low' ? '#4ade80' : aq.noiseLevel === 'Medium' ? '#facc15' : '#f87171';
-            aqg.innerHTML = `
+            if (aqg) aqg.innerHTML = `
                 <div class="aq-item"><i class="fa-solid fa-wind"></i><span class="aq-label">Noise Level</span><span class="aq-val" style="color:${noiseColor}">${aq.noiseLevel||'N/A'}</span></div>
                 <div class="aq-item"><i class="fa-solid fa-wave-square"></i><span class="aq-label">Echo</span><span class="aq-val" style="color:${aq.echoDetected?'#f87171':'#4ade80'}">${aq.echoDetected?'Detected':'None'}</span></div>
                 <div class="aq-item"><i class="fa-solid fa-star"></i><span class="aq-label">Clarity Score</span><span class="aq-val">${aq.clarityScore||0}/100</span></div>
@@ -1027,27 +1042,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.aiVideoCoach) {
             const vc = data.aiVideoCoach;
             const ab = document.getElementById('coach-assessment-box');
-            ab.innerHTML = `<p class="feedback-text">${vc.overallAssessment || ''}</p>`;
+            if (ab) ab.innerHTML = `<p class="feedback-text">${vc.overallAssessment || ''}</p>`;
             renderList('coach-mistakes-list', vc.topMistakes || []);
             const ipl = document.getElementById('improvement-plan-list');
-            ipl.innerHTML = '';
-            (vc.improvementPlan || []).forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'plan-step';
-                const impactColor = item.impact === 'High' ? '#4ade80' : item.impact === 'Medium' ? '#facc15' : '#f87171';
-                div.innerHTML = `
-                    <div class="plan-step-num">${item.step}</div>
-                    <div class="plan-step-info">
-                        <p class="plan-step-action">${item.action}</p>
-                        <div class="plan-step-tags">
-                            <span style="color:${impactColor};border-color:${impactColor}40;background:${impactColor}15;" class="plan-tag">Impact: ${item.impact}</span>
-                            <span class="plan-tag">Effort: ${item.effort}</span>
-                        </div>
-                    </div>`;
-                ipl.appendChild(div);
-            });
+            if (ipl) {
+                ipl.innerHTML = '';
+                (vc.improvementPlan || []).forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'plan-step';
+                    const impactColor = item.impact === 'High' ? '#4ade80' : item.impact === 'Medium' ? '#facc15' : '#f87171';
+                    div.innerHTML = `
+                        <div class="plan-step-num">${item.step}</div>
+                        <div class="plan-step-info">
+                            <p class="plan-step-action">${item.action}</p>
+                            <div class="plan-step-tags">
+                                <span style="color:${impactColor};border-color:${impactColor}40;background:${impactColor}15;" class="plan-tag">Impact: ${item.impact}</span>
+                                <span class="plan-tag">Effort: ${item.effort}</span>
+                            </div>
+                        </div>`;
+                    ipl.appendChild(div);
+                });
+            }
             const enc = document.getElementById('coach-encouragement');
-            enc.innerHTML = vc.encouragement ? `<div class="encouragement-box"><i class="fa-solid fa-heart"></i> ${vc.encouragement}</div>` : '';
+            if (enc) enc.innerHTML = vc.encouragement ? `<div class="encouragement-box"><i class="fa-solid fa-heart"></i> ${vc.encouragement}</div>` : '';
         }
 
         // Reset chat
