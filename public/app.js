@@ -2,6 +2,13 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
+    let ACTIVE_API_BASE_URL = (localStorage.getItem('YT_ANALYZER_CUSTOM_API_URL') || window.API_BASE_URL || '').replace(/\/$/, '');
+
+    const apiUrl = (path) => {
+        const base = ACTIVE_API_BASE_URL || (window.API_BASE_URL || '').replace(/\/$/, '');
+        return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+    };
+
     // ── DOM refs ──────────────────────────────────────────────────────────────
     const dropZone           = document.getElementById('drop-zone');
     const fileInput          = document.getElementById('file-input');
@@ -29,13 +36,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const historyList        = document.getElementById('history-list');
     const historyEmpty       = document.getElementById('history-empty');
 
+    // ── Server Wakeup Banner ─────────────────────────────────────────────
+    function showWakeupBanner(show, msg) {
+        let banner = document.getElementById('server-wakeup-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'server-wakeup-banner';
+            banner.style.cssText = 'position:fixed;top:56px;left:0;width:100%;z-index:9999;background:linear-gradient(90deg,#7928ca,#ff0055);color:#fff;font-size:0.85rem;font-weight:600;text-align:center;padding:0.6rem 1rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;transition:opacity 0.3s;';
+            document.body.appendChild(banner);
+        }
+        if (show) {
+            banner.style.display = 'flex';
+            banner.style.opacity = '1';
+            banner.innerHTML = `<span style="font-size:1.1rem;">⏳</span> ${msg}`;
+        } else {
+            banner.style.opacity = '0';
+            setTimeout(() => banner.style.display = 'none', 400);
+        }
+    }
+
     let currentFile     = null;
     let pollInterval    = null;
     let lastResultData  = null;
     let currentJobId    = null;
     let chatHistory     = [];
-    let channelChatHistory = [];
-    let currentChannelData = null;
     let currentVideoMeta = { width: 0, height: 0 };
 
     // ── Tab Switching ─────────────────────────────────────────────────────────
@@ -94,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData();
         formData.append('thumbnail', thumbFile);
         try {
-            const res = await fetch('/api/analyze-thumbnail', { method: 'POST', body: formData });
+            const res = await fetch(apiUrl('/api/analyze-thumbnail'), { method: 'POST', body: formData });
             const json = await res.json();
             if (!res.ok || !json.success) throw new Error(json.error || 'Analysis failed');
             renderThumbnailAnalysis(json.data);
@@ -175,7 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const entry = getSavedHistory()[parseInt(btn.dataset.idx)];
                 if (entry) {
                     lastResultData = entry.result;
-                    window.lastStudioVideoPath = entry.videoPath || '';
                     currentJobId = null;
                     chatHistory = [];
                     uploadCard.classList.add('hidden');
@@ -222,28 +245,75 @@ document.addEventListener('DOMContentLoaded', () => {
         videoEl.onerror = () => uploadFile(file, '16:9');
     }
 
-    function uploadFile(file, videoAspect) {
+    async function uploadFile(file, videoAspect) {
         uploadCard.classList.add('hidden');
         processingCard.classList.remove('hidden');
         updateProgress(0);
         logsBody.innerHTML = '';
-        addLog('Connecting to local server...');
+
+        // Step 1: Wake up the server first (critical for Render.com free tier cold starts)
+        addLog('⏳ Waking up server... please wait.');
+        showWakeupBanner(true, 'Connecting to server... This may take 20-30 seconds.');
+        const serverReady = await pingServerUntilReady();
+        if (!serverReady) {
+            handleError('Server is offline or taking too long. Please try again in 30 seconds.');
+            return;
+        }
+        showWakeupBanner(false);
+        addLog('✅ Server ready! Uploading video...');
+
+        // Step 2: Upload
+        doUpload(file, videoAspect);
+    }
+
+    function pingServerUntilReady(maxAttempts = 5, delayMs = 6000) {
+        return new Promise(async (resolve) => {
+            for (let i = 0; i < maxAttempts; i++) {
+                try {
+                    const controller = new AbortController();
+                    const t = setTimeout(() => controller.abort(), 10000);
+                    const res = await fetch(apiUrl('/api/status'), { signal: controller.signal });
+                    clearTimeout(t);
+                    if (res.ok) { resolve(true); return; }
+                } catch (e) {
+                    console.warn(`Server ping attempt ${i + 1} failed:`, e.message);
+                    if (i < maxAttempts - 1) {
+                        addLog(`Server starting up... retry ${i + 1}/${maxAttempts - 1}`);
+                        await new Promise(r => setTimeout(r, delayMs));
+                    }
+                }
+            }
+            resolve(false);
+        });
+    }
+
+    function doUpload(file, videoAspect) {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/analyze');
-        xhr.upload.addEventListener('progress', e => { if (e.lengthComputable) updateProgress(Math.round((e.loaded / e.total) * 25)); });
+        xhr.open('POST', apiUrl('/api/analyze'));
+        xhr.timeout = 120000; // 2 min timeout for upload
+        xhr.upload.addEventListener('progress', e => {
+            if (e.lengthComputable) updateProgress(Math.round((e.loaded / e.total) * 25));
+        });
         xhr.onload = function() {
             if (xhr.status === 200) {
                 try {
                     const resp = JSON.parse(xhr.responseText);
-                    if (resp.success && resp.jobId) { currentJobId = resp.jobId; chatHistory = []; addLog('Upload done! Starting AI analysis...'); startPolling(resp.jobId); }
-                    else handleError(resp.error || 'Failed to register job.');
+                    if (resp.success && resp.jobId) {
+                        currentJobId = resp.jobId;
+                        chatHistory = [];
+                        addLog('Upload done! Starting AI analysis...');
+                        startPolling(resp.jobId);
+                    } else {
+                        handleError(resp.error || 'Failed to register job.');
+                    }
                 } catch { handleError('Error parsing server response.'); }
             } else {
                 try { handleError(JSON.parse(xhr.responseText).error || `Server error: ${xhr.status}`); }
                 catch { handleError(`Server returned code: ${xhr.status}`); }
             }
         };
-        xhr.onerror = () => handleError('Network error during upload.');
+        xhr.ontimeout = () => handleError('Upload timed out. Try a smaller video (under 50MB).');
+        xhr.onerror = () => handleError('Network error during upload. Check your internet connection and try again.');
         const fd = new FormData();
         fd.append('video', file);
         fd.append('videoAspect', videoAspect);
@@ -257,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let lastLogCount = 0;
         pollInterval = setInterval(async () => {
             try {
-                const res = await fetch(`/api/job/${jobId}`);
+                const res = await fetch(apiUrl(`/api/job/${jobId}`));
                 if (!res.ok) throw new Error('API unreachable.');
                 const job = await res.json();
                 if (job.logs && job.logs.length > lastLogCount) {
@@ -270,7 +340,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateProgress(100);
                     addLog('Rendering dashboard...');
                     lastResultData = job.result;
-                    window.lastStudioVideoPath = job.videoPath || '';
                     saveToHistory(job.result, currentFile?.name || 'Unknown', currentFile?.size || 0, job.videoPath);
                     setTimeout(() => renderResults(job.result, currentFile?.name, currentFile?.size), 800);
                 } else if (job.status === 'failed') {
@@ -289,9 +358,6 @@ document.addEventListener('DOMContentLoaded', () => {
         resultsDashboard.classList.remove('hidden');
         tabButtons.forEach((b, i) => i === 0 ? b.classList.add('active') : b.classList.remove('active'));
         tabPanels.forEach((p, i) => i === 0 ? p.classList.add('active') : p.classList.remove('active'));
-
-        // Pass analysis context to Studio
-        if (window.setStudioContext) window.setStudioContext(data, filename, window.lastStudioVideoPath);
 
         // Video preview
         if (currentFile) {
@@ -1013,11 +1079,32 @@ document.addEventListener('DOMContentLoaded', () => {
         // ── TAB 8: UPLOAD ──────────────────────────────────────────────────────
         if (data.thumbnailImageUrl) {
             const thumbImg = document.getElementById('thumbnail-img');
-            thumbImg.src = data.thumbnailImageUrl;
             const wrapper = document.getElementById('thumbnail-wrapper');
             wrapper.classList.toggle('vertical', data.videoAspect === '9:16');
+            wrapper.classList.add('is-loading');
+            wrapper.classList.remove('has-error');
+            thumbImg.alt = data.thumbnailPrompt ? `AI thumbnail: ${data.thumbnailPrompt}` : 'AI generated YouTube thumbnail';
+            thumbImg.decoding = 'async';
+            thumbImg.referrerPolicy = 'no-referrer';
+            thumbImg.dataset.retryCount = '0';
+            thumbImg.onload = () => {
+                wrapper.classList.remove('is-loading', 'has-error');
+            };
+            thumbImg.onerror = () => {
+                const retryCount = Number(thumbImg.dataset.retryCount || '0');
+                if (retryCount < 1) {
+                    thumbImg.dataset.retryCount = String(retryCount + 1);
+                    const retryUrl = new URL(data.thumbnailImageUrl);
+                    retryUrl.searchParams.set('seed', String(Date.now() % 100000));
+                    thumbImg.src = retryUrl.toString();
+                    return;
+                }
+                wrapper.classList.remove('is-loading');
+                wrapper.classList.add('has-error');
+            };
+            thumbImg.src = data.thumbnailImageUrl;
             const dlLink = document.getElementById('thumbnail-download-link');
-            dlLink.href = `/api/download-thumbnail?url=${encodeURIComponent(data.thumbnailImageUrl)}`;
+            dlLink.href = apiUrl(`/api/download-thumbnail?url=${encodeURIComponent(data.thumbnailImageUrl)}`);
             dlLink.setAttribute('download', data.videoAspect === '9:16' ? 'yt_shorts_thumbnail.jpg' : 'yt_thumbnail.jpg');
             document.getElementById('thumbnail-external-link').href = data.thumbnailImageUrl;
         }
@@ -1053,7 +1140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const typingEl = appendTyping();
 
         try {
-            const res = await fetch('/api/chat', {
+            const res = await fetch(apiUrl('/api/chat'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ jobId: currentJobId, message, history: chatHistory })
@@ -1141,234 +1228,162 @@ document.addEventListener('DOMContentLoaded', () => {
         renderList('algo-priority-list', algo.actionPriorities || []);
     }
 
-    // ── YouTube Channel Linking ─────────────────────────────────────────────
-    const ytLinkBtn = document.getElementById('yt-link-btn');
-    const channelLinkBtn = document.getElementById('channel-link-btn');
-    const channelRefreshBtn = document.getElementById('channel-refresh-btn');
-    const channelDisconnectBtn = document.getElementById('channel-disconnect-btn');
-    const channelStatusText = document.getElementById('channel-status-text');
-    const channelChatInput = document.getElementById('channel-chat-input');
-    const channelChatSendBtn = document.getElementById('channel-chat-send-btn');
+    // ── Smart Server Auto-Discovery & Auto-Fallback ──────────────────────
+    const CANDIDATE_URLS = [
+        localStorage.getItem('YT_ANALYZER_CUSTOM_API_URL'),
+        'https://ytanalyzerpro.loca.lt',
+        'http://192.168.1.9:5000',
+        'http://192.168.1.9:3000',
+        'https://yt-analyzer-pro-backend.onrender.com'
+    ].filter(Boolean).map(u => u.trim().replace(/\/$/, ''));
 
-    ytLinkBtn?.addEventListener('click', () => openChannelTabAndLink());
-    channelLinkBtn?.addEventListener('click', linkYoutubeAccount);
-    channelRefreshBtn?.addEventListener('click', () => loadChannelData(true));
-    channelDisconnectBtn?.addEventListener('click', disconnectYoutubeAccount);
-    channelChatSendBtn?.addEventListener('click', sendChannelChat);
-    channelChatInput?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChannelChat(); } });
-    document.querySelectorAll('.channel-chat-suggest-btn').forEach(btn => {
-        btn.addEventListener('click', () => { channelChatInput.value = btn.dataset.msg; sendChannelChat(); });
-    });
-    window.addEventListener('message', event => {
-        if (event.origin === window.location.origin && event.data?.type === 'youtube-linked') loadChannelData(true);
-    });
-
-    function openChannelTabAndLink() {
-        switchToTab('tab-channel');
-        linkYoutubeAccount();
-    }
-
-    function switchToTab(tabId) {
-        tabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
-        tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === tabId));
-    }
-
-    async function linkYoutubeAccount() {
-        setChannelStatus('Opening Google login...');
-        try {
-            const res = await fetch('/api/youtube/auth-url');
-            const json = await res.json();
-            if (!res.ok) throw new Error(json.error || 'Could not start YouTube linking.');
-            window.open(json.authUrl, 'youtubeLink', 'width=520,height=720');
-            setChannelStatus('Complete Google login, then this panel will refresh.');
-        } catch (err) {
-            setChannelStatus(err.message, true);
-        }
-    }
-
-    async function loadChannelData(refresh = false) {
-        setChannelStatus(refresh ? 'Refreshing channel data...' : 'Loading channel data...');
-        try {
-            const res = await fetch(`/api/youtube/channel${refresh ? '?refresh=1' : ''}`);
-            const json = await res.json();
-            if (!res.ok) throw new Error(json.error || 'Could not load channel.');
-            currentChannelData = json.data;
-            renderChannelData(json.data);
-            setChannelStatus(`Linked. Last refresh: ${new Date(json.data.refreshedAt).toLocaleString()}`);
-            checkApiStatus();
-        } catch (err) {
-            setChannelStatus(err.message, true);
-        }
-    }
-
-    async function disconnectYoutubeAccount() {
-        await fetch('/api/youtube/disconnect', { method: 'POST' });
-        currentChannelData = null;
-        channelChatHistory = [];
-        document.getElementById('channel-summary-card').classList.add('hidden');
-        document.getElementById('channel-videos-card').classList.add('hidden');
-        document.getElementById('channel-chat-card').classList.add('hidden');
-        setChannelStatus('Disconnected.');
-        checkApiStatus();
-    }
-
-    function setChannelStatus(text, isError = false) {
-        if (!channelStatusText) return;
-        channelStatusText.textContent = text;
-        channelStatusText.classList.toggle('error', isError);
-    }
-
-    function renderChannelData(data) {
-        document.getElementById('channel-summary-card').classList.remove('hidden');
-        document.getElementById('channel-videos-card').classList.remove('hidden');
-        document.getElementById('channel-chat-card').classList.remove('hidden');
-
-        const channel = data.channel || {};
-        const stats = data.statistics || {};
-        const summary = data.summary || {};
-        document.getElementById('channel-avatar').src = channel.thumbnail || '';
-        document.getElementById('channel-title').textContent = channel.title || 'YouTube Channel';
-        document.getElementById('channel-description').textContent = channel.description || 'No channel description found.';
-        const publicLink = document.getElementById('channel-public-link');
-        publicLink.href = channel.customUrl ? `https://www.youtube.com/${channel.customUrl}` : `https://www.youtube.com/channel/${channel.id}`;
-
-        const metricGrid = document.getElementById('channel-metrics-grid');
-        metricGrid.innerHTML = [
-            { icon: 'fa-users', label: 'Subscribers', value: stats.hiddenSubscriberCount ? 'Hidden' : formatNumber(stats.subscriberCount) },
-            { icon: 'fa-eye', label: 'Channel Views', value: formatNumber(stats.viewCount) },
-            { icon: 'fa-video', label: 'Videos', value: formatNumber(stats.videoCount) },
-            { icon: 'fa-chart-line', label: 'Avg Views', value: formatNumber(summary.averageViews) },
-            { icon: 'fa-mobile-screen', label: 'Shorts Avg', value: formatNumber(summary.averageShortViews) },
-            { icon: 'fa-comments', label: 'Engagement', value: `${summary.engagementRate || 0}%` }
-        ].map(item => `
-            <div class="channel-metric">
-                <i class="fa-solid ${item.icon}"></i>
-                <span class="channel-metric-value">${item.value}</span>
-                <span class="channel-metric-label">${item.label}</span>
-            </div>`).join('');
-
-        document.getElementById('channel-insight-strip').innerHTML = `
-            <div><strong>Best format:</strong> ${escapeHtml(summary.bestFormat || 'Not enough data.')}</div>
-            <div><strong>Upload cadence:</strong> ${escapeHtml(summary.uploadCadence || 'Unknown')}</div>
-            <div><strong>Fetched:</strong> ${summary.totalVideosFetched || 0} uploads (${summary.shortsCount || 0} Shorts)</div>
-        `;
-        document.getElementById('channel-fetch-count').textContent = `${summary.totalVideosFetched || 0} fetched`;
-        renderChannelVideos(data.videos || []);
-        resetChannelChatIntro(data);
-    }
-
-    function renderChannelVideos(videos) {
-        const list = document.getElementById('channel-videos-list');
-        list.innerHTML = '';
-        videos.slice(0, 30).forEach(video => {
-            const item = document.createElement('a');
-            item.className = 'channel-video-item';
-            item.href = video.url;
-            item.target = '_blank';
-            item.innerHTML = `
-                <img src="${escapeHtml(video.thumbnail)}" alt="">
-                <div class="channel-video-info">
-                    <div class="channel-video-title">${escapeHtml(video.title)}</div>
-                    <div class="channel-video-meta">
-                        <span>${video.type}</span>
-                        <span>${formatNumber(video.viewCount)} views</span>
-                        <span>${formatNumber(video.likeCount)} likes</span>
-                        <span>${formatNumber(video.commentCount)} comments</span>
-                        <span>${video.duration}</span>
-                    </div>
-                </div>
-                <i class="fa-solid fa-arrow-up-right-from-square"></i>
-            `;
-            list.appendChild(item);
-        });
-    }
-
-    function resetChannelChatIntro(data) {
-        channelChatHistory = [];
-        const msgs = document.getElementById('channel-chat-messages');
-        msgs.innerHTML = `
-            <div class="chat-msg ai-msg">
-                <div class="chat-avatar"><i class="fa-solid fa-robot"></i></div>
-                <div class="chat-bubble">Channel linked. I can now answer using ${data.summary?.totalVideosFetched || 0} real uploads and your channel stats.</div>
-            </div>`;
-    }
-
-    async function sendChannelChat() {
-        const message = channelChatInput.value.trim();
-        if (!message) return;
-        channelChatInput.value = '';
-        appendChannelChatMsg(message, 'user');
-        const typingEl = appendChannelTyping();
-        try {
-            const res = await fetch('/api/channel-chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message, history: channelChatHistory })
-            });
-            const json = await res.json();
-            if (!res.ok) throw new Error(json.error || 'Channel chat failed.');
-            typingEl.remove();
-            appendChannelChatMsg(json.reply, 'ai');
-            channelChatHistory.push({ role: 'user', content: message });
-            channelChatHistory.push({ role: 'assistant', content: json.reply });
-        } catch (err) {
-            typingEl.remove();
-            appendChannelChatMsg(`Error: ${err.message}`, 'ai');
-        }
-    }
-
-    function appendChannelChatMsg(text, role) {
-        const msgsEl = document.getElementById('channel-chat-messages');
-        const div = document.createElement('div');
-        div.className = `chat-msg ${role === 'ai' ? 'ai-msg' : 'user-msg'}`;
-        div.innerHTML = role === 'ai'
-            ? `<div class="chat-avatar"><i class="fa-solid fa-robot"></i></div><div class="chat-bubble">${formatChatText(text)}</div>`
-            : `<div class="chat-bubble">${escapeHtml(text)}</div><div class="chat-avatar user-avatar"><i class="fa-solid fa-user"></i></div>`;
-        msgsEl.appendChild(div);
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-        return div;
-    }
-
-    function appendChannelTyping() {
-        const msgsEl = document.getElementById('channel-chat-messages');
-        const div = document.createElement('div');
-        div.className = 'chat-msg ai-msg';
-        div.innerHTML = `<div class="chat-avatar"><i class="fa-solid fa-robot"></i></div><div class="chat-bubble typing-bubble"><span></span><span></span><span></span></div>`;
-        msgsEl.appendChild(div);
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-        return div;
-    }
-
-    // ── API Status ────────────────────────────────────────────────────────────
-    async function checkApiStatus() {
+    async function autoDiscoverServer() {
         const badge = document.getElementById('api-status-badge');
-        const warning = document.getElementById('api-key-warning');
-        try {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            if (data.geminiApiKeyConfigured) {
-                const extras = [
-                    data.groqConfigured ? 'Groq' : null,
-                    data.youtubeLinked ? 'YT Linked' : null
-                ].filter(Boolean).join(' + ');
-                badge.innerHTML = `<span class="status-dot active"></span> ${data.keysCount} Gemini Key${data.keysCount > 1 ? 's' : ''}${extras ? ` + ${extras}` : ''}`;
-                badge.style.color = '#86efac';
-                warning.classList.add('hidden');
-                ytLinkBtn?.classList.toggle('linked', Boolean(data.youtubeLinked));
-                if (data.youtubeLinked && !currentChannelData) loadChannelData(false);
-            } else {
-                badge.innerHTML = '<span class="status-dot error"></span> Key Missing';
-                badge.style.color = '#fca5a5';
-                warning.classList.remove('hidden');
+        const hint = document.getElementById('backend-status-hint');
+        const customInput = document.getElementById('custom-backend-url');
+
+        if (badge) {
+            badge.innerHTML = '<span class="status-dot"></span> Finding Server...';
+            badge.style.color = '#fde047';
+        }
+
+        // Test candidates in sequence
+        for (const candidate of CANDIDATE_URLS) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 3500);
+                const res = await fetch(`${candidate}/api/status`, {
+                    signal: controller.signal,
+                    headers: { 'bypass-tunnel-reminder': 'true' }
+                });
+                clearTimeout(timeout);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.ok) {
+                        ACTIVE_API_BASE_URL = candidate;
+                        window.API_BASE_URL = candidate;
+                        localStorage.setItem('YT_ANALYZER_CUSTOM_API_URL', candidate);
+                        if (customInput) customInput.value = candidate;
+                        if (hint) hint.innerHTML = `<span style="color:#86efac"><i class="fa-solid fa-circle-check"></i> Connected: ${candidate}</span>`;
+                        if (badge) {
+                            badge.innerHTML = `<span class="status-dot active"></span> ${data.keysCount || 1} Key${(data.keysCount || 1) > 1 ? 's' : ''} Active`;
+                            badge.style.color = '#86efac';
+                        }
+                        showWakeupBanner(false);
+                        console.log('[YT Analyzer] Auto-connected to:', candidate);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.log(`[YT Analyzer] ${candidate} unreachable:`, e.message);
             }
-        } catch { badge.innerHTML = '<span class="status-dot error"></span> Offline'; badge.style.color = '#fca5a5'; }
+        }
+
+        // Fallback check on current ACTIVE_API_BASE_URL with cold start wakeup
+        if (ACTIVE_API_BASE_URL) {
+            try {
+                showWakeupBanner(true, 'Server cold start... Waking up (15-20 seconds).');
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 20000);
+                const res = await fetch(`${ACTIVE_API_BASE_URL}/api/status`, {
+                    signal: controller.signal,
+                    headers: { 'bypass-tunnel-reminder': 'true' }
+                });
+                clearTimeout(timeout);
+                if (res.ok) {
+                    showWakeupBanner(false);
+                    if (badge) {
+                        badge.innerHTML = `<span class="status-dot active"></span> Connected`;
+                        badge.style.color = '#86efac';
+                    }
+                    return true;
+                }
+            } catch (e) {
+                console.warn('Long ping failed:', e.message);
+            }
+        }
+
+        showWakeupBanner(false);
+        if (badge) {
+            badge.innerHTML = '<span class="status-dot error"></span> Tap to Fix Server';
+            badge.style.color = '#fca5a5';
+        }
+        if (hint) hint.innerHTML = `<span style="color:#fca5a5"><i class="fa-solid fa-triangle-exclamation"></i> Server Offline — Tap button below</span>`;
+        return false;
+    }
+
+    async function checkApiStatus() {
+        await autoDiscoverServer();
     }
     checkApiStatus();
 
-    // ── Exports ───────────────────────────────────────────────────────────────
-    exportPdfBtn.addEventListener('click', exportPDF);
-    exportJsonBtn.addEventListener('click', exportJSON);
-    exportTxtBtn.addEventListener('click', exportTXT);
+    // ── Server Modal & Connection Settings ────────────────────────────────
+    const serverModalOverlay = document.getElementById('server-modal-overlay');
+    const serverModalDrawer  = document.getElementById('server-modal-drawer');
+    const serverModalClose   = document.getElementById('server-modal-close-btn');
+    const apiStatusBadge     = document.getElementById('api-status-badge');
+
+    function openServerModal() {
+        if (serverModalOverlay && serverModalDrawer) {
+            serverModalOverlay.classList.add('active');
+            serverModalDrawer.classList.add('active');
+        }
+    }
+
+    function closeServerModal() {
+        if (serverModalOverlay && serverModalDrawer) {
+            serverModalOverlay.classList.remove('active');
+            serverModalDrawer.classList.remove('active');
+        }
+    }
+
+    if (apiStatusBadge) apiStatusBadge.addEventListener('click', openServerModal);
+    if (serverModalClose) serverModalClose.addEventListener('click', closeServerModal);
+    if (serverModalOverlay) serverModalOverlay.addEventListener('click', closeServerModal);
+
+    function connectToServerUrl(url, name) {
+        ACTIVE_API_BASE_URL = url.trim().replace(/\/$/, '');
+        window.API_BASE_URL = ACTIVE_API_BASE_URL;
+        localStorage.setItem('YT_ANALYZER_CUSTOM_API_URL', ACTIVE_API_BASE_URL);
+        const input = document.getElementById('custom-backend-url');
+        if (input) input.value = ACTIVE_API_BASE_URL;
+        closeServerModal();
+        showToast(`Connecting to ${name}...`);
+        checkApiStatus();
+    }
+
+    const modalOptTunnel  = document.getElementById('modal-opt-tunnel');
+    const modalOptLocalIp = document.getElementById('modal-opt-localip');
+    const modalOptCloud   = document.getElementById('modal-opt-cloud');
+
+    if (modalOptTunnel) modalOptTunnel.addEventListener('click', () => connectToServerUrl('https://ytanalyzerpro.loca.lt', 'Live Tunnel'));
+    if (modalOptLocalIp) modalOptLocalIp.addEventListener('click', () => connectToServerUrl('http://192.168.1.9:5000', 'Local Wi-Fi'));
+    if (modalOptCloud) modalOptCloud.addEventListener('click', () => connectToServerUrl('https://yt-analyzer-pro-backend.onrender.com', 'Render Cloud'));
+
+    const btnUseTunnel  = document.getElementById('btn-use-tunnel');
+    const btnUseLocalIp = document.getElementById('btn-use-localip');
+    const btnAutoDetect = document.getElementById('btn-autodetect-server');
+    const saveServerBtn = document.getElementById('save-server-btn');
+
+    if (btnUseTunnel) btnUseTunnel.addEventListener('click', () => connectToServerUrl('https://ytanalyzerpro.loca.lt', 'Live Tunnel'));
+    if (btnUseLocalIp) btnUseLocalIp.addEventListener('click', () => connectToServerUrl('http://192.168.1.9:5000', 'Local Wi-Fi'));
+    if (btnAutoDetect) btnAutoDetect.addEventListener('click', () => { showToast('Auto-detecting servers...'); autoDiscoverServer(); });
+    if (saveServerBtn) {
+        saveServerBtn.addEventListener('click', () => {
+            const customInput = document.getElementById('custom-backend-url');
+            if (customInput && customInput.value.trim()) {
+                connectToServerUrl(customInput.value.trim(), 'Custom Server');
+            } else {
+                showToast('Auto-detecting best server...');
+                autoDiscoverServer();
+            }
+        });
+    }
+
+    // ── Exports (null-safe for mobile layout) ────────────────────────────
+    if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportPDF);
+    if (exportJsonBtn) exportJsonBtn.addEventListener('click', exportJSON);
+    if (exportTxtBtn) exportTxtBtn.addEventListener('click', exportTXT);
 
     function exportJSON() {
         if (!lastResultData) { alert('No data.'); return; }
@@ -1555,11 +1570,28 @@ document.addEventListener('DOMContentLoaded', () => {
         else el.innerText = val || '';
     }
     function updateProgress(pct) { progressFill.style.width = `${pct}%`; progressPercentage.innerText = `${pct}%`; }
+    function cleanLogMessage(message) {
+        const text = String(message || '');
+        if (!/[ÃÂðŸ�]/.test(text)) return text;
+        if (/Video uploaded successfully/i.test(text)) return '[OK] Video uploaded successfully';
+        if (/processing/i.test(text)) return '[INFO] Processing started';
+        if (/Uploading video/i.test(text)) return '[INFO] Uploading video to AI processing engine';
+        if (/Extracting video metadata/i.test(text)) return '[INFO] Extracting video metadata';
+        if (/Detecting scene/i.test(text)) return '[INFO] Detecting scene changes and key moments';
+        return text
+            .replace(/[^\x20-\x7E]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim() || '[INFO] Processing update';
+    }
     function addLog(message) {
         const ts = new Date().toLocaleTimeString();
         const div = document.createElement('div');
         div.className = 'log-entry';
-        div.innerHTML = `<span style="color:var(--text-muted)">[${ts}]</span> ${message}`;
+        const timeSpan = document.createElement('span');
+        timeSpan.style.color = 'var(--text-muted)';
+        timeSpan.textContent = `[${ts}] `;
+        div.appendChild(timeSpan);
+        div.appendChild(document.createTextNode(cleanLogMessage(message)));
         logsBody.appendChild(div);
         logsBody.scrollTop = logsBody.scrollHeight;
     }
@@ -1697,9 +1729,281 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function getFlagEmoji(country) {
-        const flags = { 'India':'🇮🇳','USA':'🇺🇸','UK':'🇬🇧','Canada':'🇨🇦','Australia':'🇦🇺','Germany':'🇩🇪','France':'🇫🇷','Brazil':'🇧🇷' };
-        return flags[country] || '🌍';
+    // ── MOBILE NAVIGATION & SCREEN SWITCHING ────────────────────────────
+    const mobileNavItems = document.querySelectorAll('.mobile-nav-item');
+    const appScreens     = document.querySelectorAll('.app-screen');
+
+    mobileNavItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const targetScreenId = item.getAttribute('data-screen');
+            mobileNavItems.forEach(nav => nav.classList.remove('active'));
+            item.classList.add('active');
+
+            appScreens.forEach(screen => {
+                if (screen.id === targetScreenId) {
+                    screen.classList.add('active-screen');
+                } else {
+                    screen.classList.remove('active-screen');
+                }
+            });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    });
+
+    const topHistoryBtn = document.getElementById('top-history-btn');
+    if (topHistoryBtn) {
+        topHistoryBtn.addEventListener('click', () => {
+            historyDrawer.classList.add('open');
+            historyOverlay.classList.add('open');
+            renderHistoryList();
+        });
+    }
+
+    // ── CREATOR LAB SUB-TABS ──────────────────────────────────────────────
+    const ctTabs   = document.querySelectorAll('.ct-tab');
+    const toolPanels = document.querySelectorAll('.tool-panel');
+
+    ctTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTool = tab.getAttribute('data-tool');
+            ctTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            toolPanels.forEach(panel => {
+                if (panel.id === targetTool) {
+                    panel.classList.add('active');
+                } else {
+                    panel.classList.remove('active');
+                }
+            });
+        });
+    });
+
+    // ── TOOL 1: VIRAL TITLES & HOOKS ─────────────────────────────────────
+    const genTitlesBtn = document.getElementById('generate-titles-btn');
+    const titlesOutput = document.getElementById('titles-output-box');
+
+    if (genTitlesBtn) {
+        genTitlesBtn.addEventListener('click', async () => {
+            const topic = document.getElementById('title-topic-input').value.trim();
+            const niche = document.getElementById('title-niche-select').value;
+            const format = document.getElementById('title-format-select').value;
+
+            if (!topic) return alert('Please enter a video topic or idea.');
+
+            genTitlesBtn.disabled = true;
+            genTitlesBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating Titles & Hooks...';
+            titlesOutput.classList.remove('hidden');
+            titlesOutput.innerHTML = '<div class="thumb-loading"><div class="mini-spinner"></div> Analyzing YouTube viral patterns...</div>';
+
+            try {
+                const res = await fetch(apiUrl('/api/creator/titles-hooks'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, niche, format })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Generation failed');
+
+                const { titles, hooks } = data.data || {};
+
+                let html = '<h4><i class="fa-solid fa-fire text-primary"></i> Top Viral Titles</h4><div style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.75rem;">';
+                (titles || []).forEach((item, i) => {
+                    html += `<div style="background:rgba(255,255,255,0.04);padding:0.75rem;border-radius:10px;border:1px solid rgba(255,255,255,0.08);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+                            <strong style="color:#fff;font-size:0.95rem;">${item.title}</strong>
+                            <span style="background:#ff005520;color:#ff0055;padding:0.2rem 0.5rem;border-radius:12px;font-size:0.75rem;font-weight:700;">CTR: ${item.ctrScore || 95}%</span>
+                        </div>
+                        <small style="color:var(--text-muted);">${item.rationale || 'High curiosity trigger'}</small>
+                    </div>`;
+                });
+                html += '</div>';
+
+                html += '<h4 style="margin-top:1.25rem;"><i class="fa-solid fa-bolt text-secondary"></i> 3-Second Retention Hooks</h4><div style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.75rem;">';
+                (hooks || []).forEach((item, i) => {
+                    html += `<div style="background:rgba(255,255,255,0.04);padding:0.75rem;border-radius:10px;border:1px solid rgba(255,255,255,0.08);">
+                        <div style="color:#7928ca;font-weight:700;font-size:0.8rem;margin-bottom:0.25rem;">[${item.type || 'Visual + Spoken'}]</div>
+                        <p style="color:#fff;font-weight:600;margin-bottom:0.25rem;">"${item.script}"</p>
+                        <small style="color:var(--text-muted);">🎥 Visual: ${item.visualCue || 'Zoom in'}</small>
+                    </div>`;
+                });
+                html += '</div>';
+
+                titlesOutput.innerHTML = html;
+            } catch (err) {
+                titlesOutput.innerHTML = `<p style="color:#f87171;"><i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}</p>`;
+            } finally {
+                genTitlesBtn.disabled = false;
+                genTitlesBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Generate Viral Titles & Hooks';
+            }
+        });
+    }
+
+    // ── TOOL 2: AI SCRIPT WRITER ─────────────────────────────────────────
+    const genScriptBtn = document.getElementById('generate-script-btn');
+    const scriptOutput = document.getElementById('script-output-box');
+
+    if (genScriptBtn) {
+        genScriptBtn.addEventListener('click', async () => {
+            const title = document.getElementById('script-title-input').value.trim();
+            const targetDuration = document.getElementById('script-duration-select').value;
+            const tone = document.getElementById('script-tone-select').value;
+
+            if (!title) return alert('Please enter a video title or script concept.');
+
+            genScriptBtn.disabled = true;
+            genScriptBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Writing AI Script...';
+            scriptOutput.classList.remove('hidden');
+            scriptOutput.innerHTML = '<div class="thumb-loading"><div class="mini-spinner"></div> Drafting scene-by-scene script breakdown...</div>';
+
+            try {
+                const res = await fetch(apiUrl('/api/creator/script'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, targetDuration, tone })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Generation failed');
+
+                const { scenes, wordCount, estimatedDuration, callToAction } = data.data || {};
+
+                let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                    <h4><i class="fa-solid fa-scroll text-primary"></i> Script Breakdown</h4>
+                    <span style="font-size:0.8rem;color:var(--text-muted);">${wordCount || 130} words (~${estimatedDuration || '60s'})</span>
+                </div><div style="display:flex;flex-direction:column;gap:0.75rem;">`;
+
+                (scenes || []).forEach(scene => {
+                    html += `<div style="background:rgba(255,255,255,0.04);padding:0.75rem;border-radius:10px;border-left:3px solid #ff0055;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem;">
+                            <span style="color:#ff0055;font-weight:700;font-size:0.8rem;">${scene.timestamp || '0:00'} - ${scene.section || 'Scene'}</span>
+                        </div>
+                        <p style="color:#fff;margin-bottom:0.35rem;font-weight:500;">🗣️ "${scene.voiceoverText || ''}"</p>
+                        <small style="color:var(--text-muted);display:block;">🎬 Visual: ${scene.visualDirection || 'Camera cut'}</small>
+                        <small style="color:#7928ca;display:block;">🔊 Audio/SFX: ${scene.soundEffect || 'None'}</small>
+                    </div>`;
+                });
+                html += `</div>
+                <div style="margin-top:1rem;background:rgba(121,40,202,0.15);padding:0.75rem;border-radius:10px;border:1px solid #7928ca;">
+                    <strong style="color:#7928ca;font-size:0.85rem;">📢 Call to Action:</strong>
+                    <p style="color:#fff;font-size:0.9rem;margin-top:0.2rem;">${callToAction || 'Subscribe for more!'}</p>
+                </div>`;
+
+                scriptOutput.innerHTML = html;
+            } catch (err) {
+                scriptOutput.innerHTML = `<p style="color:#f87171;"><i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}</p>`;
+            } finally {
+                genScriptBtn.disabled = false;
+                genScriptBtn.innerHTML = '<i class="fa-solid fa-pen-nib"></i> Write Full AI Script';
+            }
+        });
+    }
+
+    // ── TOOL 3: TAGS & SEO SUITE ──────────────────────────────────────────
+    const genSeoBtn = document.getElementById('generate-seo-btn');
+    const seoOutput = document.getElementById('seo-output-box');
+
+    if (genSeoBtn) {
+        genSeoBtn.addEventListener('click', async () => {
+            const title = document.getElementById('seo-title-input').value.trim();
+
+            if (!title) return alert('Please enter a video title.');
+
+            genSeoBtn.disabled = true;
+            genSeoBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Finding Search Keywords...';
+            seoOutput.classList.remove('hidden');
+            seoOutput.innerHTML = '<div class="thumb-loading"><div class="mini-spinner"></div> Mining YouTube search volume...</div>';
+
+            try {
+                const res = await fetch(apiUrl('/api/creator/seo-tags'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Generation failed');
+
+                const { tags, hashtags, seoDescription, primaryKeyword } = data.data || {};
+
+                let html = `<h4><i class="fa-solid fa-tags text-primary"></i> High Ranking Keywords & Tags</h4>
+                <div class="tags-pill-container" style="margin-top:0.5rem;margin-bottom:1rem;">
+                    ${(tags || []).map(t => `<span class="tag-pill" onclick="copyRawText('${t}')">${t}</span>`).join('')}
+                </div>
+                <h4><i class="fa-solid fa-hashtag text-secondary"></i> Trending Hashtags</h4>
+                <div class="tags-pill-container" style="margin-top:0.5rem;margin-bottom:1rem;">
+                    ${(hashtags || []).map(h => `<span class="tag-pill" style="background:#7928ca25;color:#7928ca;" onclick="copyRawText('${h}')">${h}</span>`).join('')}
+                </div>
+                <h4><i class="fa-solid fa-align-left text-success"></i> Optimized Description</h4>
+                <textarea readonly style="width:100%;height:120px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.75rem;font-size:0.85rem;margin-top:0.5rem;">${seoDescription || ''}</textarea>`;
+
+                seoOutput.innerHTML = html;
+            } catch (err) {
+                seoOutput.innerHTML = `<p style="color:#f87171;"><i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}</p>`;
+            } finally {
+                genSeoBtn.disabled = false;
+                genSeoBtn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Generate Tags & Description';
+            }
+        });
+    }
+
+    // ── TOOL 4: VIRAL IDEAS ENGINE ───────────────────────────────────────
+    const genIdeasBtn = document.getElementById('generate-ideas-btn');
+    const ideasOutput = document.getElementById('viral-ideas-output');
+
+    if (genIdeasBtn) {
+        genIdeasBtn.addEventListener('click', async () => {
+            const category = document.getElementById('viral-category-input').value.trim();
+
+            genIdeasBtn.disabled = true;
+            genIdeasBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Brainstorming Viral Ideas...';
+            ideasOutput.classList.remove('hidden');
+            ideasOutput.innerHTML = '<div class="thumb-loading"><div class="mini-spinner"></div> Analyzing viral video trends...</div>';
+
+            try {
+                const res = await fetch(apiUrl('/api/creator/viral-ideas'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Generation failed');
+
+                const { ideas } = data.data || {};
+
+                let html = '<h4><i class="fa-solid fa-lightbulb text-primary"></i> Recommended Viral Video Ideas</h4><div style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.75rem;">';
+                (ideas || []).forEach(item => {
+                    html += `<div style="background:rgba(255,255,255,0.04);padding:0.75rem;border-radius:10px;border:1px solid rgba(255,255,255,0.08);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+                            <strong style="color:#fff;font-size:0.95rem;">${item.concept}</strong>
+                            <span style="background:#10b98120;color:#10b981;padding:0.2rem 0.5rem;border-radius:12px;font-size:0.75rem;font-weight:700;">Est: ${item.predictedViews || '100K+'}</span>
+                        </div>
+                        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.25rem;">💡 Angle: ${item.angle || ''}</p>
+                        <small style="color:#ff0055;">🖼️ Thumbnail: ${item.thumbnailConcept || ''}</small>
+                    </div>`;
+                });
+                html += '</div>';
+
+                ideasOutput.innerHTML = html;
+            } catch (err) {
+                ideasOutput.innerHTML = `<p style="color:#f87171;"><i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}</p>`;
+            } finally {
+                genIdeasBtn.disabled = false;
+                genIdeasBtn.innerHTML = '<i class="fa-solid fa-fire"></i> Generate Viral Concepts';
+            }
+        });
+    }
+
+    // ── SAVE SETTINGS ───────────────────────────────────────────────────
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', () => {
+            const key = document.getElementById('custom-gemini-key').value.trim();
+            if (key) {
+                localStorage.setItem('YT_GEMINI_KEY', key);
+                alert('Gemini API key saved successfully!');
+            } else {
+                alert('Please enter a valid key.');
+            }
+        });
     }
 });
 
@@ -1720,544 +2024,4 @@ window.copyRawText = function(text) {
         setTimeout(() => { toast.classList.remove('show'); }, 2200);
     });
 };
-
-// ═══════════════════════════════════════════════════════════════
-//  AI EDIT STUDIO MODULE
-// ═══════════════════════════════════════════════════════════════
-(function StudioModule() {
-    const studioOverlay     = document.getElementById('studio-overlay');
-    const studioModal       = document.getElementById('studio-modal');
-    const studioOpenBtn     = document.getElementById('studio-tab-btn') || document.getElementById('studio-open-btn');
-    const studioCloseBtn    = document.getElementById('studio-close-btn');
-    const studioNavBtns     = document.querySelectorAll('.studio-nav-btn');
-    const studioTabPanels   = document.querySelectorAll('.studio-tab-panel');
-
-    const promptTextarea    = document.getElementById('studio-prompt-textarea');
-    const generateBtn       = document.getElementById('studio-generate-btn');
-    const voiceBtn          = document.getElementById('studio-voice-btn');
-    const exampleChips      = document.querySelectorAll('.studio-example-chip');
-    const refreshExamples   = document.getElementById('studio-refresh-examples');
-    const inspirationBtn    = document.getElementById('studio-inspiration-btn');
-
-    const orbitContainer    = document.getElementById('studio-orbit-container');
-    const generatingDiv     = document.getElementById('studio-generating');
-    const resultDiv         = document.getElementById('studio-result');
-    const resultBody        = document.getElementById('studio-result-body');
-    const genSteps          = document.querySelectorAll('.studio-gen-step');
-
-    const videoPlayer       = document.getElementById('studio-video-player');
-    const downloadBtn       = document.getElementById('studio-download-btn');
-    const copyBtn           = document.getElementById('studio-copy-btn');
-    const regenerateBtn     = document.getElementById('studio-regenerate-btn');
-
-    const chatMessages      = document.getElementById('studio-chat-messages');
-    const chatInput         = document.getElementById('studio-chat-input');
-    const chatSend          = document.getElementById('studio-chat-send');
-    const chatChips         = document.querySelectorAll('.studio-chat-chip');
-
-    const creditsVal        = document.getElementById('studio-credits-val');
-    const creditsPillVal    = document.getElementById('studio-credits-pill-val');
-    const creditsFill       = document.getElementById('studio-credits-fill');
-
-    let studioCredits = 20;
-    let studioHistory = [];
-    let currentPrompt = '';
-    let isGenerating = false;
-    let recognition = null;
-    let currentVideoUrl = '';
-    let currentEdits = { filter: 'none', speed: 1.0, textOverlay: '', audioEffect: 'none' };
-    let statusTextLog = '';
-
-    // ── Open / Close ──
-    if (studioOpenBtn) studioOpenBtn.addEventListener('click', openStudio);
-    if (studioCloseBtn) studioCloseBtn.addEventListener('click', closeStudio);
-    if (studioOverlay) studioOverlay.addEventListener('click', closeStudio);
-
-    function openStudio() {
-        if (!studioModal || !studioOverlay) return;
-        studioModal.classList.remove('hidden');
-        studioOverlay.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-
-        // Load current video or fallback
-        if (window.lastStudioVideoPath) {
-            videoPlayer.src = window.lastStudioVideoPath;
-        }
-
-        populateIdeasTab();
-        populateOptimizeTab();
-    }
-
-    function closeStudio() {
-        if (!studioModal || !studioOverlay) return;
-        studioModal.classList.add('hidden');
-        studioOverlay.classList.add('hidden');
-        document.body.style.overflow = '';
-        videoPlayer.pause();
-    }
-
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && !studioModal?.classList.contains('hidden')) closeStudio();
-    });
-
-    // ── Sidebar Navigation ──
-    studioNavBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.getAttribute('data-studio-tab');
-            if (!target) return;
-            studioNavBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            studioTabPanels.forEach(p => {
-                p.classList.toggle('active', p.id === target);
-            });
-        });
-    });
-
-    // ── Credits display ──
-    function updateCredits(val) {
-        studioCredits = Math.max(0, val);
-        if (creditsVal) creditsVal.textContent = studioCredits;
-        if (creditsPillVal) creditsPillVal.textContent = studioCredits;
-        if (creditsFill) creditsFill.style.width = `${(studioCredits / 20) * 100}%`;
-    }
-    updateCredits(20);
-
-    // ── Example chips ──
-    exampleChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            const p = chip.getAttribute('data-prompt');
-            if (p && promptTextarea) {
-                promptTextarea.value = p;
-                promptTextarea.focus();
-            }
-        });
-    });
-
-    // ── Refresh examples rotation ──
-    const extraExamples = [
-        { icon: 'fa-solid fa-fire', label: 'Viral reaction edit', prompt: 'Make it a fast reaction short with grayscale filter and speed up pacing to 1.5x speed' },
-        { icon: 'fa-solid fa-video', label: 'Vintage cinematic grade', prompt: 'Vintage film look with vignette and dramatic contrast filter' },
-        { icon: 'fa-solid fa-dumbbell', label: 'High energy music beat', prompt: 'High energy speed up edit at 1.25x speed with bass boosted audio' },
-        { icon: 'fa-solid fa-tag', label: 'Bold title card text', prompt: 'Add bold banner caption title overlay saying BEAST MODE ON' }
-    ];
-    let exampleSet = 0;
-    if (refreshExamples) {
-        refreshExamples.addEventListener('click', () => {
-            exampleSet = (exampleSet + 1) % 2;
-            const grid = document.getElementById('studio-examples-grid');
-            if (!grid) return;
-            if (exampleSet === 1) {
-                grid.innerHTML = extraExamples.map(e =>
-                    `<button class="studio-example-chip" data-prompt="${e.prompt}"><i class="${e.icon}"></i> ${e.label}</button>`
-                ).join('');
-                grid.querySelectorAll('.studio-example-chip').forEach(c => {
-                    c.addEventListener('click', () => {
-                        if (promptTextarea) promptTextarea.value = c.getAttribute('data-prompt');
-                    });
-                });
-            } else {
-                location.reload();
-            }
-        });
-    }
-
-    // ── Inspiration Button ──
-    const inspirations = [
-        'Apply a high contrast filter and overlay BEAST MODE caption',
-        'Convert to grayscale and speed up the pacing to 1.25x speed',
-        'Add a cinematic vintage LUT grade overlay with bass boost audio',
-        'Sync edit with sepia filter tone and speed up transitions to 1.5x'
-    ];
-    if (inspirationBtn) {
-        inspirationBtn.addEventListener('click', () => {
-            const r = inspirations[Math.floor(Math.random() * inspirations.length)];
-            if (promptTextarea) { promptTextarea.value = r; promptTextarea.focus(); }
-        });
-    }
-
-    // ── Voice Input ──
-    if (voiceBtn) {
-        voiceBtn.addEventListener('click', () => {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                alert('Voice input not supported in this browser. Please use Chrome.');
-                return;
-            }
-            if (recognition) { recognition.stop(); recognition = null; voiceBtn.classList.remove('recording'); return; }
-            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SR();
-            recognition.lang = 'en-US';
-            recognition.interimResults = false;
-            voiceBtn.classList.add('recording');
-            recognition.start();
-            recognition.onresult = e => {
-                const transcript = e.results[0][0].transcript;
-                if (promptTextarea) promptTextarea.value = transcript;
-                voiceBtn.classList.remove('recording');
-                recognition = null;
-            };
-            recognition.onerror = recognition.onend = () => {
-                voiceBtn.classList.remove('recording');
-                recognition = null;
-            };
-        });
-    }
-
-    // ── Show states ──
-    function showOrbit() {
-        orbitContainer?.classList.remove('hidden');
-        generatingDiv?.classList.add('hidden');
-        resultDiv?.classList.add('hidden');
-    }
-
-    function showGenerating() {
-        orbitContainer?.classList.add('hidden');
-        generatingDiv?.classList.remove('hidden');
-        resultDiv?.classList.add('hidden');
-    }
-
-    function showResult() {
-        orbitContainer?.classList.add('hidden');
-        generatingDiv?.classList.add('hidden');
-        resultDiv?.classList.remove('hidden');
-    }
-
-    async function animatePlanSteps(steps) {
-        const container = document.getElementById('studio-gen-steps');
-        if (!container) return;
-        
-        container.innerHTML = steps.map((s, i) => `
-            <div class="studio-gen-step" id="dynamic-step-${i}">
-                <i class="fa-solid fa-circle-notch" style="margin-right:8px;opacity:0.5;"></i> ${s.stepName}
-            </div>
-        `).join('');
-
-        for (let i = 0; i < steps.length; i++) {
-            const el = document.getElementById(`dynamic-step-${i}`);
-            if (el) {
-                el.classList.add('active');
-                el.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="color:#a78bfa;margin-right:8px;"></i> ${steps[i].stepName}`;
-                await new Promise(r => setTimeout(r, 900));
-                el.classList.remove('active');
-                el.classList.add('done');
-                el.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981;margin-right:8px;"></i> ${steps[i].stepName}`;
-            }
-        }
-    }
-
-    // ── Generate Plan ──
-    if (generateBtn) generateBtn.addEventListener('click', generateVideoEdit);
-    if (promptTextarea) {
-        promptTextarea.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && e.ctrlKey) generateVideoEdit();
-        });
-    }
-
-    async function generateVideoEdit() {
-        const prompt = promptTextarea?.value?.trim();
-        if (!prompt) { promptTextarea?.focus(); return; }
-        if (isGenerating) return;
-        if (studioCredits <= 0) { alert('No credits left. Credits reset each session.'); return; }
-        if (!window.lastStudioVideoPath) { alert('Please analyze a video first.'); return; }
-
-        isGenerating = true;
-        currentPrompt = prompt;
-        generateBtn.disabled = true;
-        showGenerating();
-
-        // 1. Initial Planning Step
-        const container = document.getElementById('studio-gen-steps');
-        if (container) {
-            container.innerHTML = `
-                <div class="studio-gen-step active">
-                    <i class="fa-solid fa-brain fa-spin" style="color:#a78bfa;margin-right:8px;"></i> Manus AI is planning your editing steps...
-                </div>
-            `;
-        }
-
-        const videoCtx = window.lastStudioContext || null;
-        const videoName = window.lastStudioVideoName || 'My Video';
-
-        try {
-            // Call Planning Endpoint
-            const planResponse = await fetch('/api/studio/plan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt,
-                    videoContext: videoCtx,
-                    videoName
-                })
-            });
-
-            const planJson = await planResponse.json();
-            if (!planResponse.ok || !planJson.success) {
-                throw new Error(planJson.error || 'Planning failed.');
-            }
-
-            const plannedSteps = planJson.steps;
-            const plannedSummary = planJson.summary;
-
-            // Render dynamic steps
-            const animationPromise = animatePlanSteps(plannedSteps);
-
-            // 2. Call Execution Endpoint (concurrently)
-            const executeResponse = await fetch('/api/studio/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    steps: plannedSteps,
-                    videoPath: window.lastStudioVideoPath
-                })
-            });
-
-            const execJson = await executeResponse.json();
-            if (!executeResponse.ok || !execJson.success) {
-                throw new Error(execJson.error || 'Execution failed.');
-            }
-
-            // Await animation completion so the user gets the full experience
-            await animationPromise;
-
-            currentVideoUrl = execJson.editedVideoUrl;
-            currentEdits = plannedSteps;
-            statusTextLog = plannedSummary;
-            studioHistory = [];
-            chatMessages.innerHTML = '';
-            
-            // Load and play edited video
-            videoPlayer.src = currentVideoUrl;
-            videoPlayer.load();
-            videoPlayer.play().catch(e => console.log('Auto-play blocked by browser.'));
-
-            // Setup download link
-            downloadBtn.href = currentVideoUrl;
-
-            // Render status logs with premium badges
-            if (resultBody) {
-                const badges = currentEdits.map(s => `
-                    <span style="display:inline-flex;align-items:center;background:rgba(124,58,237,0.15);color:#c4b5fd;border:1px solid rgba(124,58,237,0.3);padding:0.25rem 0.6rem;border-radius:20px;font-size:0.75rem;font-weight:600;gap:4px;margin-bottom:4px;">
-                        <i class="fa-solid fa-circle-check" style="color:#10b981;"></i> ${s.stepName}
-                    </span>
-                `).join(' ');
-
-                resultBody.innerHTML = `
-                    <div style="font-weight:700;color:#c4b5fd;margin-bottom:0.4rem;"><i class="fa-solid fa-circle-info"></i> Manus AI Agent Log</div>
-                    <p style="margin:0 0 0.5rem 0;color:#e5e7eb;font-size:0.8rem;line-height:1.45;">${statusTextLog}</p>
-                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem;">
-                        ${badges}
-                    </div>`;
-            }
-
-            updateCredits(studioCredits - 1);
-            showResult();
-
-        } catch (err) {
-            showOrbit();
-            alert(`Error running FFmpeg edit: ${err.message}`);
-        } finally {
-            isGenerating = false;
-            if (generateBtn) generateBtn.disabled = false;
-        }
-    }
-
-    // ── Copy / Refine / Regenerate ──
-    if (copyBtn) {
-        copyBtn.addEventListener('click', () => {
-            if (statusTextLog) {
-                navigator.clipboard.writeText(statusTextLog);
-                copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                setTimeout(() => { copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 2000);
-            }
-        });
-    }
-
-    if (regenerateBtn) {
-        regenerateBtn.addEventListener('click', () => {
-            if (currentPrompt) { promptTextarea.value = currentPrompt; generateVideoEdit(); }
-        });
-    }
-
-    // ── Studio Chat Refinements ──
-    if (chatSend) chatSend.addEventListener('click', sendStudioChatRefine);
-    if (chatInput) {
-        chatInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendStudioChatRefine(); }
-        });
-    }
-    chatChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            const msg = chip.getAttribute('data-msg');
-            if (msg && chatInput) { chatInput.value = msg; sendStudioChatRefine(); }
-        });
-    });
-
-    async function sendStudioChatRefine() {
-        const msg = chatInput?.value?.trim();
-        if (!msg || !currentVideoUrl) return;
-        chatInput.value = '';
-
-        appendStudioChat('user', msg);
-        studioHistory.push({ role: 'user', content: msg });
-
-        // Show inline typing indicator
-        const typingEl = document.createElement('div');
-        typingEl.className = 'studio-chat-msg';
-        typingEl.innerHTML = `
-            <div class="studio-chat-avatar"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
-            <div class="studio-chat-bubble" style="min-width:60px;padding:0.4rem 0.65rem;">
-                <span style="display:flex;gap:4px;align-items:center;padding:0.1rem 0;">
-                    <span style="width:5px;height:5px;border-radius:50%;background:#a78bfa;animation:typingDot 1.2s infinite;"></span>
-                    <span style="width:5px;height:5px;border-radius:50%;background:#a78bfa;animation:typingDot 1.2s 0.2s infinite;"></span>
-                    <span style="width:5px;height:5px;border-radius:50%;background:#a78bfa;animation:typingDot 1.2s 0.4s infinite;"></span>
-                </span>
-            </div>`;
-        chatMessages?.appendChild(typingEl);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-
-        try {
-            // Stage 1: Call plan refinement endpoint
-            const planResp = await fetch('/api/studio/plan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt: msg,
-                    videoContext: window.lastStudioContext || null,
-                    currentEdits: currentEdits,
-                    isRefine: true,
-                    history: studioHistory.slice(-8)
-                })
-            });
-
-            const planJson = await planResp.json();
-            if (!planResp.ok || !planJson.success) throw new Error(planJson.error || 'Planning failed');
-
-            const plannedSteps = planJson.steps;
-            const plannedSummary = planJson.summary;
-
-            // Stage 2: Execute new steps
-            const execResp = await fetch('/api/studio/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    steps: plannedSteps,
-                    videoPath: window.lastStudioVideoPath
-                })
-            });
-
-            const execJson = await execResp.json();
-            typingEl.remove();
-
-            if (!execResp.ok || !execJson.success) throw new Error(execJson.error || 'Execution failed');
-
-            currentVideoUrl = execJson.editedVideoUrl;
-            currentEdits = plannedSteps;
-            statusTextLog = plannedSummary;
-
-            // Load new edited video
-            videoPlayer.src = currentVideoUrl;
-            videoPlayer.load();
-            videoPlayer.play().catch(e => {});
-
-            // Update download button
-            downloadBtn.href = currentVideoUrl;
-
-            // Update log box with dynamic badges
-            if (resultBody) {
-                const badges = currentEdits.map(s => `
-                    <span style="display:inline-flex;align-items:center;background:rgba(124,58,237,0.15);color:#c4b5fd;border:1px solid rgba(124,58,237,0.3);padding:0.25rem 0.6rem;border-radius:20px;font-size:0.75rem;font-weight:600;gap:4px;margin-bottom:4px;">
-                        <i class="fa-solid fa-circle-check" style="color:#10b981;"></i> ${s.stepName}
-                    </span>
-                `).join(' ');
-
-                resultBody.innerHTML = `
-                    <div style="font-weight:700;color:#c4b5fd;margin-bottom:0.4rem;"><i class="fa-solid fa-circle-info"></i> Manus AI Edit Log (Refined)</div>
-                    <p style="margin:0 0 0.5rem 0;color:#e5e7eb;font-size:0.8rem;line-height:1.45;">${statusTextLog}</p>
-                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem;">
-                        ${badges}
-                    </div>`;
-            }
-
-            appendStudioChat('ai', statusTextLog);
-            studioHistory.push({ role: 'assistant', content: statusTextLog });
-
-        } catch (err) {
-            typingEl.remove();
-            appendStudioChat('ai', `Edit failed: ${err.message}`);
-        }
-    }
-
-    function appendStudioChat(role, text) {
-        if (!chatMessages) return;
-        const div = document.createElement('div');
-        div.className = `studio-chat-msg${role === 'user' ? ' studio-user-msg' : ''}`;
-        const icon = role === 'user' ? '<i class="fa-solid fa-user"></i>' : '<i class="fa-solid fa-wand-magic-sparkles"></i>';
-        const bubbleText = text.replace(/\n/g, '<br>');
-        div.innerHTML = `
-            <div class="studio-chat-avatar">${icon}</div>
-            <div class="studio-chat-bubble">${bubbleText}</div>`;
-        chatMessages.appendChild(div);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    // ── Populate Ideas tab from video analysis ──
-    function populateIdeasTab() {
-        const grid = document.getElementById('studio-ideas-grid');
-        if (!grid) return;
-        const ctx = window.lastStudioContext;
-        if (!ctx) {
-            grid.innerHTML = `<div class="studio-idea-card">
-                <i class="fa-solid fa-lightbulb"></i>
-                <div><div class="studio-idea-title">Analyze a video first</div>
-                <div class="studio-idea-desc">Analyze a video to get personalized edit ideas based on your content.</div></div>
-            </div>`;
-            return;
-        }
-        const editStyle = ctx.feedback?.editingStyle || '';
-        const viralScore = ctx.viralScore?.overall || 0;
-        const hookScore = ctx.hookAnalysis?.rating || 0;
-        const ideas = [
-            { icon: 'fa-fire', title: 'Viral Short Remix', desc: `Based on your ${viralScore}/100 viral score — condense the best 45 seconds with beat-synced cuts.` },
-            { icon: 'fa-palette', title: 'Cinema Color Grade', desc: 'Apply cinematic LUT with warm shadows and teal highlights for premium feel.' },
-            { icon: 'fa-bolt', title: 'Hook Booster Edit', desc: `Your hook scored ${hookScore}/10. Restructure opening 5 seconds with a stronger visual punch.` },
-            { icon: 'fa-music', title: 'Music Sync Edit', desc: 'Auto-cut to beat drops and transitions synced to background music rhythm.' },
-            { icon: 'fa-closed-captioning', title: 'Caption Explosion', desc: 'Add animated word-by-word captions in MrBeast style to boost watch time.' }
-        ];
-        grid.innerHTML = ideas.map(idea => `
-            <div class="studio-idea-card" onclick="document.getElementById('studio-prompt-textarea').value='${idea.desc.replace(/'/g, '')}';document.querySelector('.studio-nav-btn[data-studio-tab=studio-home]').click();">
-                <i class="fa-solid ${idea.icon}"></i>
-                <div>
-                    <div class="studio-idea-title">${idea.title}</div>
-                    <div class="studio-idea-desc">${idea.desc}</div>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    // ── Populate Optimize tab ──
-    function populateOptimizeTab() {
-        const list = document.getElementById('studio-optimize-list');
-        if (!list) return;
-        const ctx = window.lastStudioContext;
-        const tips = ctx?.feedback?.improvementSuggestions || [
-            'Add jump cuts every 2-3 seconds to maintain viewer attention',
-            'Use motion blur transitions between scenes for smoother flow',
-            'Increase background music by 15-20% for emotional impact',
-            'Add subtitle captions to boost watch time by up to 40%',
-            'Use zoom-in effect on key talking points for emphasis'
-        ];
-        list.innerHTML = tips.slice(0, 6).map(tip => `
-            <div class="studio-opt-item">
-                <i class="fa-solid fa-circle-check"></i>
-                <span>${tip}</span>
-            </div>
-        `).join('');
-    }
-
-    // ── Expose context setter for main app ──
-    window.setStudioContext = function(resultData, videoName) {
-        window.lastStudioContext = resultData;
-        window.lastStudioVideoName = videoName || 'My Video';
-    };
-
-})();
 

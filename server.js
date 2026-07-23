@@ -12,16 +12,39 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// Fix CORS for Capacitor Android WebView (sends requests from capacitor://localhost or http://localhost)
+app.use(cors({
+    origin: function(origin, callback) {
+        // Allow all origins: browser dev, Capacitor Android, Capacitor iOS
+        callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    credentials: true
+}));
+app.options('*', cors());
 app.use(express.json());
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api/status', (req, res) => {
+    const geminiKeys = [];
+    // Collect all configured Gemini keys
+    for (let i = 1; i <= 10; i++) {
+        const k = process.env[`GEMINI_API_KEY${i === 1 ? '' : '_' + i}`] || process.env[`GEMINI_API_KEY_${i}`];
+        if (k && k.trim()) geminiKeys.push(k.trim());
+    }
+    const mainKey = process.env.GEMINI_API_KEY || '';
+    if (mainKey && !geminiKeys.includes(mainKey)) geminiKeys.unshift(mainKey);
+    const groqConfigured = !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim());
     res.json({
         ok: true,
         service: 'yt-analyzer-pro-backend',
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        geminiApiKeyConfigured: geminiKeys.length > 0,
+        keysCount: geminiKeys.length || (mainKey ? 1 : 0),
+        groqConfigured
     });
 });
 
@@ -1605,6 +1628,117 @@ app.post('/api/studio/execute', async (req, res) => {
 
     } catch (err) {
         console.error('[Manus Agent] Execution error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+async function runTextAiPrompt(systemPrompt, userPrompt) {
+    const keys = getApiKeys();
+    if (keys.length > 0) {
+        try {
+            const genAI = new GoogleGenerativeAI(keys[0]);
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const combinedPrompt = `${systemPrompt}\n\nUser Input: ${userPrompt}\n\nReturn clean JSON format.`;
+            const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: combinedPrompt }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            });
+            const text = result.response.text();
+            return JSON.parse(text);
+        } catch (e) {
+            console.log('Gemini text prompt fallback to Groq/Manus:', e.message);
+        }
+    }
+    
+    const messages = [
+        { role: 'system', content: systemPrompt + "\nOutput MUST be valid JSON format only." },
+        { role: 'user', content: userPrompt }
+    ];
+    const textResult = await callManusWithFallback(messages, 2000);
+    try {
+        const cleanJson = textResult.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanJson);
+    } catch {
+        return { text: textResult };
+    }
+}
+
+// === CREATOR TOOLS API ENDPOINTS ===
+
+app.post('/api/creator/titles-hooks', async (req, res) => {
+    try {
+        const { topic, niche, format } = req.body;
+        if (!topic) return res.status(400).json({ error: 'Topic is required.' });
+
+        const sys = `You are YouTube's top viral strategist. Analyze topic, niche (${niche || 'General'}), and video format (${format || 'Shorts'}). Generate 5 viral titles and 3 high-retention 3-second hooks.
+Return ONLY valid JSON matching:
+{
+  "titles": [{ "title": "Title Here", "ctrScore": 95, "rationale": "High curiosity gap" }],
+  "hooks": [{ "type": "Visual + Spoken", "script": "Hook script...", "visualCue": "Zoom camera", "retentionImpact": "Instant engagement" }]
+}`;
+        const data = await runTextAiPrompt(sys, `Topic: ${topic}`);
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/creator/script', async (req, res) => {
+    try {
+        const { title, targetDuration, tone } = req.body;
+        if (!title) return res.status(400).json({ error: 'Title is required.' });
+
+        const sys = `Generate a scene-by-scene YouTube video script breakdown for "${title}". Target duration: ${targetDuration || '60s Short'}. Tone: ${tone || 'Energetic'}.
+Return ONLY valid JSON matching:
+{
+  "estimatedDuration": "${targetDuration || '60s'}",
+  "wordCount": 130,
+  "scenes": [
+    { "timestamp": "0:00-0:03", "section": "Hook", "visualDirection": "Fast text zoom", "voiceoverText": "Spoken line...", "soundEffect": "Whoosh" }
+  ],
+  "callToAction": "Subscribe CTA line"
+}`;
+        const data = await runTextAiPrompt(sys, `Title: ${title}`);
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/creator/seo-tags', async (req, res) => {
+    try {
+        const { title, descriptionKeywords } = req.body;
+        if (!title) return res.status(400).json({ error: 'Title is required.' });
+
+        const sys = `Generate high ranking YouTube tags, hashtags, and description for "${title}".
+Return ONLY valid JSON matching:
+{
+  "tags": ["tag1", "tag2", "tag3"],
+  "hashtags": ["#tag1", "#tag2"],
+  "seoDescription": "Optimized description text with CTA...",
+  "primaryKeyword": "main keyword",
+  "searchVolumeRating": "High"
+}`;
+        const data = await runTextAiPrompt(sys, `Title: ${title}`);
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/creator/viral-ideas', async (req, res) => {
+    try {
+        const { category, audience } = req.body;
+        const sys = `Generate 4 viral video ideas for category "${category || 'Tech/Gaming/Vlog'}".
+Return ONLY valid JSON matching:
+{
+  "ideas": [
+    { "concept": "Concept Title", "angle": "Unique twist", "predictedViews": "100K-500K", "difficulty": "Medium", "thumbnailConcept": "Visual description" }
+  ]
+}`;
+        const data = await runTextAiPrompt(sys, `Category: ${category || 'General'}`);
+        res.json({ success: true, data });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });

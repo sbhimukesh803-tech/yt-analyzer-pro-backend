@@ -4,3 +4,7 @@ uploads/
 logs/
 npm-debug.log*
 .DS_Store
+*.zip
+*.apk
+android/gradle-8.14.3-all.zip
+
